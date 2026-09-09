@@ -1,0 +1,190 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
+}
+
+model User {
+  id                String              @id @default(uuid())
+  fullName          String
+  email             String              @unique
+  mobileNumber      String              @unique
+  passwordHash      String
+  role              String              @default("User")
+  emailVerified     Boolean             @default(false)
+  mobileVerified    Boolean             @default(false)
+  businessType      Int?
+  selectedPlan      String?
+  paymentMethod     String?
+  onboardingStatus  String              @default("PART1_PENDING")
+  createdAt         DateTime            @default(now())
+  updatedAt         DateTime            @updatedAt
+  refreshTokens     RefreshToken[]
+  verificationTokens VerificationToken[]
+  resetTokens       PasswordResetToken[]
+  mobileOtps        MobileOtp[]
+  locations         BusinessLocation[]
+  distributor      DistributorDetails?
+  pharmacy         PharmacyDetails?
+  bank             BankDetails?
+  documents         Document[]
+}
+
+model RefreshToken {
+  id          String   @id @default(uuid())
+  tokenHash   String   @unique
+  userId      String
+  expiresAt   DateTime
+  revokedAt   DateTime?
+  createdAt   DateTime @default(now())
+  user        User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  @@index([userId])
+}
+
+model VerificationToken {
+  id         String   @id @default(uuid())
+  tokenHash  String   @unique
+  userId     String
+  expiresAt  DateTime
+  usedAt     DateTime?
+  createdAt  DateTime @default(now())
+  user       User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  @@index([userId])
+}
+
+model PasswordResetToken {
+  id         String   @id @default(uuid())
+  tokenHash  String   @unique
+  userId     String
+  expiresAt  DateTime
+  usedAt     DateTime?
+  createdAt  DateTime @default(now())
+  user       User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  @@index([userId])
+}
+
+model MobileOtp {
+  id          String   @id @default(uuid())
+  sessionId   String   @unique
+  userId      String?
+  mobileNumber String
+  otpHash     String
+  expiresAt   DateTime
+  attempts    Int      @default(0)
+  verifiedAt  DateTime?
+  createdAt   DateTime @default(now())
+  user        User?    @relation(fields: [userId], references: [id], onDelete: Cascade)
+  @@index([mobileNumber])
+}
+
+model BusinessLocation {
+  id              String   @id @default(uuid())
+  userId          String
+  locationType    Int      @default(0)
+  warehouseName   String?
+  contactPerson   String?
+  contactNumber   String?
+  latitude        Float?
+  longitude       Float?
+  accuracy        Float?
+  formattedAddress String?
+  addressLine1    String?
+  addressLine2    String?
+  city            String?
+  state           String?
+  country         String?
+  pincode         String?
+  isPrimary       Boolean  @default(false)
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+  user            User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  @@index([userId])
+}
+
+model DistributorDetails {
+  id                         String   @id @default(uuid())
+  userId                     String   @unique
+  companyName                String
+  gstNumber                  String?
+  drugLicenseNumber          String?
+  drugLicenseExpiryDate     DateTime?
+  panNumber                  String?
+  distributorRegistrationNumber String?
+  serviceCities              Json?
+  minimumOrderValue          Float?
+  isCreditAvailable          Boolean  @default(false)
+  creditDays                 Int?
+  maximumCreditLimit         Float?
+  hasOwnDelivery             Boolean  @default(false)
+  deliveryVehicleTypes       Json?
+  warehouseOpenTime          String?
+  warehouseCloseTime         String?
+  is24x7                     Boolean  @default(false)
+  emergencyContactNumber     String?
+  contactPerson              String?
+  contactNumber              String?
+  email                      String?
+  formattedAddress           String?
+  latitude                   Float?
+  longitude                  Float?
+  createdAt                  DateTime @default(now())
+  updatedAt                  DateTime @updatedAt
+  user                       User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+}
+
+model PharmacyDetails {
+  id                         String   @id @default(uuid())
+  userId                     String   @unique
+  pharmacyName               String
+  gstNumber                  String?
+  drugLicenseNumber          String?
+  drugLicenseExpiryDate     DateTime?
+  panNumber                  String?
+  pharmacyRegistrationNumber String?
+  storeOpenTime              String?
+  storeCloseTime             String?
+  is24x7                     Boolean  @default(false)
+  emergencyContactNumber     String?
+  contactPerson              String?
+  contactNumber              String?
+  email                      String?
+  formattedAddress           String?
+  latitude                   Float?
+  longitude                  Float?
+  createdAt                  DateTime @default(now())
+  updatedAt                  DateTime @updatedAt
+  user                       User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+}
+
+model Document {
+  id           String   @id @default(uuid())
+  userId       String
+  documentType Int
+  originalName String
+  storedName   String
+  mimeType     String
+  size         Int
+  path         String
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+  user         User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  @@index([userId])
+}
+
+model BankDetails {
+  id                    String   @id @default(uuid())
+  userId                String   @unique
+  accountHolderName     String
+  bankName              String?
+  accountNumber         String
+  ifscCode              String
+  branchName            String?
+  upiId                 String?
+  ifscVerified          Boolean  @default(false)
+  createdAt             DateTime @default(now())
+  updatedAt             DateTime @updatedAt
+  user                  User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+}

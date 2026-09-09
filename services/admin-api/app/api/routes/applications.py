@@ -1,0 +1,1121 @@
+from datetime import date, datetime, timezone, timedelta
+from pathlib import Path
+from uuid import UUID
+import hashlib
+import logging
+import secrets
+
+from fastapi import APIRouter, Depends, HTTPException
+from fastapi.encoders import jsonable_encoder
+from fastapi.responses import StreamingResponse
+from sqlalchemy import select, func, or_
+from sqlalchemy.ext.asyncio import AsyncSession
+
+from app.core.config import settings
+from app.core.deps import current_admin, require_admin
+from app.core.security import decrypt, decrypt_bytes, encrypt
+from app.db.session import get_db
+from app.models import (
+    User,
+    Pharmacy,
+    Distributor,
+    BankDetails,
+    BusinessLocation,
+    Document,
+    PaymentTransaction,
+    PaymentSubscription,
+    OnboardingApplication,
+)
+from app.schemas import RejectRequest
+from app.services.audit import audit
+from app.services.provisioning import provision_erp
+
+
+logger = logging.getLogger("medorax-admin")
+
+router = APIRouter(
+    prefix="/admin/applications",
+    tags=["Admin Applications"],
+)
+
+
+DOC_NAMES = {
+    1: "GST Certificate",
+    2: "Drug License",
+    3: "PAN Card",
+    4: "Aadhaar Card",
+    5: "Business Registration",
+}
+
+
+def _money(value):
+    if value is None:
+        return None
+
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return None
+
+
+def _make_username(email: str) -> str:
+    """
+    Generate a safe ERP username from the applicant email.
+    """
+
+    local_part = email.split("@")[0].lower()
+
+    cleaned = "".join(
+        character
+        for character in local_part
+        if character.isalnum()
+    )
+
+    cleaned = cleaned[:24]
+
+    if not cleaned:
+        cleaned = "user"
+
+    return f"{cleaned}.{secrets.token_hex(3)}"
+
+
+def _generate_temporary_password(length: int = 16) -> str:
+    """
+    Generate a temporary ERP password.
+    """
+
+    alphabet = (
+        "ABCDEFGHJKLMNPQRSTUVWXYZ"
+        "abcdefghijkmnopqrstuvwxyz"
+        "23456789"
+        "!@#$"
+    )
+
+    return "".join(
+        secrets.choice(alphabet)
+        for _ in range(length)
+    )
+
+
+def _ensure_utc(value):
+    """
+    Convert naive/aware datetime values to UTC-aware datetime.
+
+    PostgreSQL installations can sometimes return naive datetime
+    values depending on the column configuration.
+    """
+
+    if value is None:
+        return None
+
+    if isinstance(value, datetime):
+        if value.tzinfo is None:
+            return value.replace(tzinfo=timezone.utc)
+
+        return value.astimezone(timezone.utc)
+
+    return value
+
+
+def _business_out(business):
+    if not business:
+        return None
+
+    if isinstance(business, Pharmacy):
+        return {
+            "type": "Pharmacy",
+            "id": str(business.id),
+            "name": business.pharmacy_name,
+            "contactPerson": business.contact_person,
+            "contactNumber": business.contact_number,
+            "email": business.email,
+            "gstNumber": business.gst_number,
+            "panNumber": business.pan_number,
+            "drugLicenseNumber": business.drug_license_number,
+            "drugLicenseExpiryDate": business.drug_license_expiry_date,
+            "registrationNumber": business.pharmacy_registration_number,
+            "formattedAddress": business.formatted_address,
+        }
+
+    return {
+        "type": "Distributor",
+        "id": str(business.id),
+        "name": business.company_name,
+        "contactPerson": business.contact_person,
+        "contactNumber": business.contact_number,
+        "email": business.email,
+        "gstNumber": business.gst_number,
+        "panNumber": business.pan_number,
+        "drugLicenseNumber": business.drug_license_number,
+        "drugLicenseExpiryDate": business.drug_license_expiry_date,
+        "registrationNumber": business.distributor_registration_number,
+        "formattedAddress": business.formatted_address,
+        "serviceCities": business.service_cities or [],
+        "minimumOrderValue": _money(business.minimum_order_value),
+        "isCreditAvailable": business.is_credit_available,
+        "creditDays": business.credit_days,
+        "maximumCreditLimit": _money(
+            business.maximum_credit_limit
+        ),
+        "hasOwnDelivery": business.has_own_delivery,
+        "deliveryVehicleTypes": business.delivery_vehicle_types or [],
+    }
+
+
+async def _row_detail(
+    db: AsyncSession,
+    row: OnboardingApplication,
+):
+    user = await db.get(User, row.user_id)
+
+    if not user:
+        raise HTTPException(
+            status_code=404,
+            detail="Applicant user not found",
+        )
+
+    pharmacy = (
+        await db.execute(
+            select(Pharmacy).where(
+                Pharmacy.user_id == row.user_id
+            )
+        )
+    ).scalar_one_or_none()
+
+    distributor = (
+        await db.execute(
+            select(Distributor).where(
+                Distributor.user_id == row.user_id
+            )
+        )
+    ).scalar_one_or_none()
+
+    bank = (
+        await db.execute(
+            select(BankDetails).where(
+                BankDetails.user_id == row.user_id
+            )
+        )
+    ).scalar_one_or_none()
+
+    locations = (
+        await db.execute(
+            select(BusinessLocation)
+            .where(
+                BusinessLocation.user_id == row.user_id
+            )
+            .order_by(BusinessLocation.created_at)
+        )
+    ).scalars().all()
+
+    documents = (
+        await db.execute(
+            select(Document)
+            .where(
+                Document.user_id == row.user_id
+            )
+            .order_by(Document.created_at.desc())
+        )
+    ).scalars().all()
+
+    payments = (
+        await db.execute(
+            select(PaymentTransaction)
+            .where(
+                PaymentTransaction.user_id == row.user_id
+            )
+            .order_by(PaymentTransaction.created_at.desc())
+        )
+    ).scalars().all()
+
+    subscriptions = (
+        await db.execute(
+            select(PaymentSubscription)
+            .where(
+                PaymentSubscription.user_id == row.user_id
+            )
+            .order_by(PaymentSubscription.created_at.desc())
+        )
+    ).scalars().all()
+
+    account = None
+    bank_name = None
+    upi = None
+    holder = None
+    branch = None
+
+    if bank:
+        try:
+            account = decrypt(
+                bank.account_number_enc
+            )
+
+            holder = decrypt(
+                bank.account_holder_name_enc
+            )
+
+            bank_name = decrypt(
+                bank.bank_name_enc
+            )
+
+            if bank.branch_name_enc:
+                branch = decrypt(
+                    bank.branch_name_enc
+                )
+
+            if bank.upi_id_enc:
+                upi = decrypt(
+                    bank.upi_id_enc
+                )
+
+        except Exception:
+            logger.exception(
+                "Unable to decrypt bank details for user %s",
+                row.user_id,
+            )
+
+    masked_account = None
+
+    if account:
+        masked_account = (
+            "*" * max(0, len(account) - 4)
+            + account[-4:]
+        )
+
+    detail = {
+        "application": {
+            "id": str(row.id),
+            "applicationId": row.application_number,
+            "status": row.status,
+            "rejectionReason": row.rejection_reason,
+            "submittedAt": row.submitted_at,
+            "reviewedAt": row.reviewed_at,
+            "pharmacyId": row.pharmacy_id,
+            "licenseKey": row.license_key,
+            "licenseExpiresAt": row.license_expires_at,
+            "erpUsername": row.erp_username,
+            "erpProvisionStatus": row.erp_provision_status,
+            "erpExternalId": row.erp_external_id,
+            "erpProvisionError": row.erp_provision_error,
+        },
+
+        "user": {
+            "id": str(user.id),
+            "fullName": user.full_name,
+            "email": user.email,
+            "mobileNumber": user.mobile_number,
+            "role": user.role,
+            "businessType": user.business_type,
+            "emailVerified": user.email_verified,
+            "mobileVerified": user.mobile_verified,
+            "isActive": user.is_active,
+            "createdAt": user.created_at,
+        },
+
+        "business": _business_out(
+            pharmacy or distributor
+        ),
+
+        "bank": {
+            "accountHolderName": holder,
+            "bankName": bank_name,
+            "accountNumber": account,
+            "accountNumberMasked": masked_account,
+            "ifscCode": bank.ifsc_code if bank else None,
+            "branchName": branch,
+            "upiId": upi,
+        },
+
+        "locations": [
+            {
+                "id": str(location.id),
+                "locationType": location.location_type,
+                "warehouseName": location.warehouse_name,
+                "contactPerson": location.contact_person,
+                "contactNumber": location.contact_number,
+                "latitude": (
+                    float(location.latitude)
+                    if location.latitude is not None
+                    else None
+                ),
+                "longitude": (
+                    float(location.longitude)
+                    if location.longitude is not None
+                    else None
+                ),
+                "formattedAddress": location.formatted_address,
+                "addressLine1": location.address_line1,
+                "addressLine2": location.address_line2,
+                "city": location.city,
+                "state": location.state,
+                "country": location.country,
+                "pincode": location.pincode,
+                "isPrimary": location.is_primary,
+            }
+            for location in locations
+        ],
+
+        "documents": [
+            {
+                "id": str(document.id),
+                "documentType": document.document_type,
+                "documentName": DOC_NAMES.get(
+                    document.document_type,
+                    f"Document {document.document_type}",
+                ),
+                "fileName": document.file_name,
+                "fileSize": document.file_size,
+                "mimeType": document.mime_type,
+                "status": document.status,
+                "uploadedAt": document.created_at,
+            }
+            for document in documents
+        ],
+
+        "payments": [
+            {
+                "id": str(payment.id),
+                "paymentId": payment.razorpay_payment_id,
+                "amountPaise": payment.amount_paise,
+                "currency": payment.currency,
+                "status": payment.status,
+                "signatureVerified": payment.signature_verified,
+                "createdAt": payment.created_at,
+            }
+            for payment in payments
+        ],
+
+        "subscriptions": [
+            {
+                "id": str(subscription.id),
+                "planCode": subscription.plan_code,
+                "status": subscription.status,
+                "amountPaise": subscription.amount_paise,
+                "currency": subscription.currency,
+                "currentStart": subscription.current_start,
+                "currentEnd": subscription.current_end,
+                "paidCount": subscription.paid_count,
+                "createdAt": subscription.created_at,
+            }
+            for subscription in subscriptions
+        ],
+    }
+
+    return detail
+
+
+@router.get("")
+async def list_applications(
+    status: str | None = None,
+    search: str | None = None,
+    page: int = 1,
+    pageSize: int = 25,
+    admin=Depends(current_admin),
+    db: AsyncSession = Depends(get_db),
+):
+    page = max(page, 1)
+    pageSize = min(max(pageSize, 1), 100)
+
+    query = (
+        select(
+            OnboardingApplication,
+            User,
+        )
+        .join(
+            User,
+            User.id == OnboardingApplication.user_id,
+        )
+    )
+
+    count_query = (
+        select(func.count())
+        .select_from(OnboardingApplication)
+        .join(
+            User,
+            User.id == OnboardingApplication.user_id,
+        )
+    )
+
+    if status and status != "all":
+        query = query.where(
+            OnboardingApplication.status == status
+        )
+
+        count_query = count_query.where(
+            OnboardingApplication.status == status
+        )
+
+    if search:
+        term = f"%{search.strip()}%"
+
+        condition = or_(
+            OnboardingApplication.application_number.ilike(
+                term
+            ),
+            User.full_name.ilike(term),
+            User.email.ilike(term),
+            User.mobile_number.ilike(term),
+        )
+
+        query = query.where(condition)
+        count_query = count_query.where(condition)
+
+    total = await db.scalar(count_query) or 0
+
+    rows = (
+        await db.execute(
+            query
+            .order_by(
+                OnboardingApplication.submitted_at.desc()
+            )
+            .offset((page - 1) * pageSize)
+            .limit(pageSize)
+        )
+    ).all()
+
+    items = []
+
+    for application, user in rows:
+        business = (
+            await db.execute(
+                select(Pharmacy).where(
+                    Pharmacy.user_id == user.id
+                )
+            )
+        ).scalar_one_or_none()
+
+        if not business:
+            business = (
+                await db.execute(
+                    select(Distributor).where(
+                        Distributor.user_id == user.id
+                    )
+                )
+            ).scalar_one_or_none()
+
+        business_name = None
+
+        if isinstance(business, Pharmacy):
+            business_name = business.pharmacy_name
+        elif isinstance(business, Distributor):
+            business_name = business.company_name
+
+        items.append(
+            {
+                "id": str(application.id),
+                "applicationId": application.application_number,
+                "status": application.status,
+                "rejectionReason": application.rejection_reason,
+                "submittedAt": application.submitted_at,
+                "fullName": user.full_name,
+                "email": user.email,
+                "mobileNumber": user.mobile_number,
+                "businessType": user.business_type,
+                "businessName": business_name,
+                "pharmacyId": application.pharmacy_id,
+                "erpProvisionStatus": application.erp_provision_status,
+            }
+        )
+
+    return {
+        "items": items,
+        "page": page,
+        "pageSize": pageSize,
+        "total": total,
+        "pages": (
+            total + pageSize - 1
+        ) // pageSize,
+    }
+
+
+@router.get("/{application_id}")
+async def get_application(
+    application_id: UUID,
+    admin=Depends(current_admin),
+    db: AsyncSession = Depends(get_db),
+):
+    row = await db.get(
+        OnboardingApplication,
+        application_id,
+    )
+
+    if not row:
+        raise HTTPException(
+            status_code=404,
+            detail="Application not found",
+        )
+
+    return await _row_detail(db, row)
+
+
+@router.post("/{application_id}/approve")
+async def approve_application(
+    application_id: UUID,
+    admin=Depends(
+        require_admin("Owner", "Admin")
+    ),
+    db: AsyncSession = Depends(get_db),
+):
+    """
+    Approve an onboarding application.
+
+    Flow:
+
+    1. Validate application.
+    2. Validate applicant.
+    3. Validate verified payment.
+    4. Generate pharmacy/distributor ID.
+    5. Generate software license.
+    6. Generate ERP username/password.
+    7. Store encrypted password.
+    8. Build JSON-safe ERP payload.
+    9. Commit approval.
+    10. Provision ERP if configured.
+    11. Update provisioning status.
+    """
+
+    row = await db.get(
+        OnboardingApplication,
+        application_id,
+    )
+
+    if not row:
+        raise HTTPException(
+            status_code=404,
+            detail="Application not found",
+        )
+
+    # ---------------------------------------------------------
+    # Already approved
+    # ---------------------------------------------------------
+
+    if row.status == "approved":
+
+        # If ERP is already provisioned, simply return.
+        if row.erp_provision_status == "provisioned":
+            return await _row_detail(db, row)
+
+        # If ERP provisioning is pending/failed,
+        # allow retry instead of returning immediately.
+        if row.erp_provision_status not in (
+            "pending",
+            "failed",
+            None,
+        ):
+            return await _row_detail(db, row)
+
+    elif row.status != "pending":
+        raise HTTPException(
+            status_code=409,
+            detail=f"Application is already {row.status}",
+        )
+
+    # ---------------------------------------------------------
+    # Applicant
+    # ---------------------------------------------------------
+
+    user = await db.get(
+        User,
+        row.user_id,
+    )
+
+    if not user:
+        raise HTTPException(
+            status_code=404,
+            detail="Applicant user not found",
+        )
+
+    # ---------------------------------------------------------
+    # Verify payment
+    # ---------------------------------------------------------
+
+    payment = (
+        await db.execute(
+            select(PaymentTransaction)
+            .where(
+                PaymentTransaction.user_id == user.id,
+                PaymentTransaction.status == "verified",
+                PaymentTransaction.signature_verified.is_(True),
+            )
+            .order_by(
+                PaymentTransaction.created_at.desc()
+            )
+        )
+    ).scalars().first()
+
+    if not payment:
+        raise HTTPException(
+            status_code=409,
+            detail="Applicant does not have a verified payment",
+        )
+
+    # ---------------------------------------------------------
+    # Subscription
+    # ---------------------------------------------------------
+
+    subscription = (
+        await db.execute(
+            select(PaymentSubscription)
+            .where(
+                PaymentSubscription.user_id == user.id
+            )
+            .order_by(
+                PaymentSubscription.created_at.desc()
+            )
+        )
+    ).scalars().first()
+
+    # ---------------------------------------------------------
+    # License expiry
+    # ---------------------------------------------------------
+
+    now = datetime.now(timezone.utc)
+
+    subscription_end = None
+
+    if subscription:
+        subscription_end = _ensure_utc(
+            subscription.current_end
+        )
+
+    if (
+        subscription_end
+        and subscription_end > now
+    ):
+        expires = subscription_end
+    else:
+        expires = now + timedelta(
+            days=settings.license_days
+        )
+
+    # ---------------------------------------------------------
+    # Pharmacy / Distributor ID
+    # ---------------------------------------------------------
+
+    if user.business_type == "Distributor":
+        prefix = "DST"
+    else:
+        prefix = "PHM"
+
+    pharmacy_id = (
+        row.pharmacy_id
+        or f"{prefix}-{secrets.token_hex(5).upper()}"
+    )
+
+    # ---------------------------------------------------------
+    # Software License
+    # ---------------------------------------------------------
+
+    license_key = (
+        row.license_key
+        or (
+            f"MEDX-"
+            f"{secrets.token_hex(6).upper()}-"
+            f"{secrets.token_hex(6).upper()}"
+        )
+    )
+
+    # ---------------------------------------------------------
+    # ERP username
+    # ---------------------------------------------------------
+
+    username = (
+        row.erp_username
+        or _make_username(user.email)
+    )
+
+    # ---------------------------------------------------------
+    # Temporary password
+    # ---------------------------------------------------------
+
+    temporary_password = None
+
+    if not row.temporary_password_enc:
+
+        temporary_password = (
+            _generate_temporary_password(
+                settings.temp_password_length
+            )
+            if hasattr(
+                settings,
+                "temp_password_length",
+            )
+            else _generate_temporary_password(16)
+        )
+
+        row.temporary_password_enc = encrypt(
+            temporary_password
+        )
+
+    else:
+        try:
+            temporary_password = decrypt(
+                row.temporary_password_enc
+            )
+        except Exception:
+            logger.exception(
+                "Unable to decrypt existing temporary password "
+                "for application %s",
+                row.id,
+            )
+
+            raise HTTPException(
+                status_code=500,
+                detail=(
+                    "Unable to decrypt existing ERP "
+                    "temporary password. Check FIELD_ENCRYPTION_KEY."
+                ),
+            )
+
+    # ---------------------------------------------------------
+    # Update application
+    # ---------------------------------------------------------
+
+    row.status = "approved"
+    row.reviewed_at = now
+    row.reviewed_by = admin.id
+    row.rejection_reason = None
+    row.pharmacy_id = pharmacy_id
+    row.license_key = license_key
+    row.license_expires_at = expires
+    row.erp_username = username
+    row.erp_provision_status = "pending"
+    row.erp_provision_error = None
+
+    # ---------------------------------------------------------
+    # Build detail
+    # ---------------------------------------------------------
+
+    detail = await _row_detail(
+        db,
+        row,
+    )
+
+    # ---------------------------------------------------------
+    # IMPORTANT:
+    # Convert datetime/date/UUID/Decimal values
+    # into JSON-compatible values.
+    # ---------------------------------------------------------
+
+    payload = jsonable_encoder(
+        {
+            "source": "medorax-onboarding",
+
+            "applicationId": row.application_number,
+
+            "userId": str(user.id),
+
+            "businessType": user.business_type,
+
+            "pharmacyId": pharmacy_id,
+
+            "licenseKey": license_key,
+
+            "licenseExpiresAt": expires,
+
+            "erpUsername": username,
+
+            "temporaryPassword": temporary_password,
+
+            "user": detail["user"],
+
+            "business": detail["business"],
+
+            "locations": detail["locations"],
+
+            "bank": detail["bank"],
+
+            "documents": detail["documents"],
+
+            "payment": (
+                detail["payments"][0]
+                if detail["payments"]
+                else None
+            ),
+
+            "subscription": (
+                detail["subscriptions"][0]
+                if detail["subscriptions"]
+                else None
+            ),
+        }
+    )
+
+    row.erp_payload_json = payload
+
+    # ---------------------------------------------------------
+    # Audit
+    # ---------------------------------------------------------
+
+    await audit(
+        db,
+        admin.id,
+        "APPLICATION_APPROVED",
+        row.id,
+        {
+            "applicationNumber": row.application_number,
+            "pharmacyId": pharmacy_id,
+            "licenseKey": license_key,
+        },
+    )
+
+    # ---------------------------------------------------------
+    # First DB commit
+    # ---------------------------------------------------------
+
+    try:
+        await db.commit()
+
+    except Exception:
+        await db.rollback()
+
+        logger.exception(
+            "Failed to commit application approval. "
+            "application_id=%s user_id=%s",
+            application_id,
+            user.id,
+        )
+
+        raise HTTPException(
+            status_code=500,
+            detail=(
+                "Application approval could not be saved. "
+                "Check admin API logs for the database error."
+            ),
+        )
+
+    # Refresh row after commit.
+    await db.refresh(row)
+
+    # ---------------------------------------------------------
+    # ERP provisioning
+    # ---------------------------------------------------------
+
+    try:
+        result = await provision_erp(
+            payload
+        )
+
+    except Exception as exc:
+        logger.exception(
+            "ERP provisioning crashed. application_id=%s",
+            application_id,
+        )
+
+        result = {
+            "status": "failed",
+            "externalId": None,
+            "error": str(exc)[:1000],
+        }
+
+    # ---------------------------------------------------------
+    # Save provisioning result
+    # ---------------------------------------------------------
+
+    row.erp_provision_status = result.get(
+        "status",
+        "pending",
+    )
+
+    row.erp_external_id = result.get(
+        "externalId"
+    )
+
+    row.erp_provision_error = result.get(
+        "error"
+    )
+
+    try:
+        await db.commit()
+
+    except Exception:
+        await db.rollback()
+
+        logger.exception(
+            "Failed to save ERP provisioning result. "
+            "application_id=%s",
+            application_id,
+        )
+
+        raise HTTPException(
+            status_code=500,
+            detail=(
+                "Application was approved, but ERP provisioning "
+                "status could not be saved."
+            ),
+        )
+
+    await db.refresh(row)
+
+    # ---------------------------------------------------------
+    # Return final application details
+    # ---------------------------------------------------------
+
+    return await _row_detail(
+        db,
+        row,
+    )
+
+
+@router.post("/{application_id}/reject")
+async def reject_application(
+    application_id: UUID,
+    body: RejectRequest,
+    admin=Depends(
+        require_admin(
+            "Owner",
+            "Admin",
+            "Reviewer",
+        )
+    ),
+    db: AsyncSession = Depends(get_db),
+):
+    row = await db.get(
+        OnboardingApplication,
+        application_id,
+    )
+
+    if not row:
+        raise HTTPException(
+            status_code=404,
+            detail="Application not found",
+        )
+
+    if row.status == "approved":
+        raise HTTPException(
+            status_code=409,
+            detail="Approved applications cannot be rejected",
+        )
+
+    reason = body.reason.strip()
+
+    if not reason:
+        raise HTTPException(
+            status_code=400,
+            detail="Rejection reason is required",
+        )
+
+    row.status = "rejected"
+    row.rejection_reason = reason
+    row.reviewed_at = datetime.now(timezone.utc)
+    row.reviewed_by = admin.id
+
+    await audit(
+        db,
+        admin.id,
+        "APPLICATION_REJECTED",
+        row.id,
+        {
+            "reason": row.rejection_reason,
+        },
+    )
+
+    try:
+        await db.commit()
+
+    except Exception:
+        await db.rollback()
+
+        logger.exception(
+            "Failed to reject application %s",
+            application_id,
+        )
+
+        raise HTTPException(
+            status_code=500,
+            detail="Application rejection could not be saved",
+        )
+
+    return {
+        "message": "Application rejected",
+        "applicationId": row.application_number,
+        "status": row.status,
+        "rejectionReason": row.rejection_reason,
+    }
+
+
+@router.get(
+    "/{application_id}/documents/{document_id}/download"
+)
+async def download_document(
+    application_id: UUID,
+    document_id: UUID,
+    admin=Depends(current_admin),
+    db: AsyncSession = Depends(get_db),
+):
+    application = await db.get(
+        OnboardingApplication,
+        application_id,
+    )
+
+    if not application:
+        raise HTTPException(
+            status_code=404,
+            detail="Application not found",
+        )
+
+    document = await db.get(
+        Document,
+        document_id,
+    )
+
+    if (
+        not document
+        or document.user_id != application.user_id
+    ):
+        raise HTTPException(
+            status_code=404,
+            detail="Document not found",
+        )
+
+    path = (
+        Path(settings.onboarding_storage_path)
+        / document.stored_name
+    )
+
+    if not path.exists():
+        raise HTTPException(
+            status_code=404,
+            detail=(
+                "Document file is not available to the "
+                "admin service. Mount the onboarding "
+                "document storage volume."
+            ),
+        )
+
+    try:
+        plain = decrypt_bytes(
+            path.read_bytes()
+        )
+
+    except Exception:
+        logger.exception(
+            "Unable to decrypt document %s",
+            document.id,
+        )
+
+        raise HTTPException(
+            status_code=500,
+            detail="Unable to decrypt document",
+        )
+
+    if (
+        hashlib.sha256(plain).hexdigest()
+        != document.sha256
+    ):
+        raise HTTPException(
+            status_code=500,
+            detail="Document integrity check failed",
+        )
+
+    return StreamingResponse(
+        iter([plain]),
+        media_type=document.mime_type,
+        headers={
+            "Content-Disposition": (
+                f'attachment; '
+                f'filename="{Path(document.file_name).name}"'
+            ),
+            "Cache-Control": "private, no-store",
+        },
+    )

@@ -1,0 +1,15 @@
+services:
+  medorax-admin-api:
+    build: .
+    container_name: medorax-admin-api
+    ports:
+      - "8001:8001"
+    env_file:
+      - .env
+    restart: unless-stopped
+    networks:
+      - medorax-python-backend_network
+
+networks:
+  medorax-python-backend_network:
+    external: true  

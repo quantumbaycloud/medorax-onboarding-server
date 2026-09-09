@@ -1,0 +1,22 @@
+import { Router } from 'express';
+import multer from 'multer';
+import path from 'node:path';
+import fs from 'node:fs';
+import { requireAuth } from '../middleware/auth.js';
+import { env } from '../config/env.js';
+import * as c from '../controllers/onboarding.js';
+import * as d from '../controllers/documents.js';
+
+fs.mkdirSync(path.resolve(env.uploadDir),{recursive:true});
+const storage=multer.diskStorage({destination:(req,file,cb)=>cb(null,path.resolve(env.uploadDir)),filename:(req,file,cb)=>cb(null,`${req.user.id}-${Date.now()}-${Math.random().toString(36).slice(2)}${path.extname(file.originalname)}`)});
+const upload=multer({storage,limits:{fileSize:env.maxFileSize}});
+const r=Router();r.use(requireAuth);
+r.post('/select-business',c.selectBusiness);r.get('/select-business',c.getBusinessType);
+r.post('/pharmacy/details',c.savePharmacy);r.get('/pharmacy/details',c.getPharmacy);r.get('/pharmacy/details/:id',c.getPharmacy);r.put('/pharmacy/details/:id',c.savePharmacy);
+r.post('/distributor/details',c.saveDistributor);r.get('/distributor/details',c.getDistributor);r.get('/distributor/details/:id',c.getDistributor);r.put('/distributor/details/:id',c.updateDistributor);
+r.post('/bank-details',c.saveBank);r.get('/bank-details',c.getBank);
+r.post('/location',c.saveLocation);r.get('/location',c.getLocations);r.get('/location/:id',c.getLocation);r.put('/location/:id',c.updateLocation);r.delete('/location/:id',c.deleteLocation);
+r.post('/documents/upload',upload.single('File'),d.upload);r.get('/documents',d.list);r.get('/documents/:id',d.get);r.put('/documents/:id',upload.single('File'),d.update);r.delete('/documents/:id',d.remove);r.get('/documents/:id/download',d.download);r.post('/documents/:id/reupload',upload.single('file'),d.reupload);
+r.post('/verify',c.complete);
+r.get('/status',c.getStatus);r.get('/me',c.getSummary);r.post('/plan',c.savePlan);r.post('/complete',c.complete);
+export default r;

@@ -1,0 +1,532 @@
+from datetime import datetime, timezone
+from uuid import UUID
+import secrets
+import string
+import logging
+
+from fastapi import APIRouter, Depends, HTTPException
+from sqlalchemy import select
+from sqlalchemy.ext.asyncio import AsyncSession
+
+from app.core.deps import current_user
+from app.core.security import encrypt, decrypt
+from app.db.session import get_db
+from app.models import (
+    User,
+    Pharmacy,
+    Distributor,
+    BankDetails,
+    BusinessLocation,
+    Document,
+    PaymentTransaction,
+    PaymentSubscription,
+    OnboardingApplication,
+)
+from app.services.audit import audit
+
+
+logger = logging.getLogger("medorax-onboarding")
+
+router = APIRouter(
+    prefix="/onboarding",
+    tags=["Onboarding Approval"],
+)
+
+
+REQUIRED_DOCUMENT_TYPES = {
+    1,
+    2,
+    3,
+    5,
+}
+
+
+def _application_out(
+    row: OnboardingApplication,
+    user: User,
+):
+    return {
+        "id": str(row.id),
+
+        "applicationId": row.application_number,
+
+        "status": row.status,
+
+        "rejectionReason": row.rejection_reason,
+
+        "submittedAt": row.submitted_at,
+
+        "reviewedAt": row.reviewed_at,
+
+        "pharmacyId": row.pharmacy_id,
+
+        "licenseKey": row.license_key,
+
+        "licenseNumber": row.license_key,
+
+        "licenseExpiresAt": row.license_expires_at,
+
+        "erpUsername": row.erp_username,
+
+        "erpProvisionStatus": row.erp_provision_status,
+
+        "erpExternalId": row.erp_external_id,
+
+        "erpProvisionError": row.erp_provision_error,
+
+        "fullName": user.full_name,
+
+        "email": user.email,
+
+        "businessType": user.business_type,
+    }
+
+
+def _random_password(
+    length: int = 16,
+) -> str:
+
+    alphabet = (
+        string.ascii_letters
+        + string.digits
+        + "!@#$%"
+    )
+
+    while True:
+
+        value = "".join(
+            secrets.choice(alphabet)
+            for _ in range(length)
+        )
+
+        if (
+            any(c.islower() for c in value)
+            and any(c.isupper() for c in value)
+            and any(c.isdigit() for c in value)
+            and any(c in "!@#$%" for c in value)
+        ):
+            return value
+
+
+def _username(
+    user: User,
+) -> str:
+
+    base = "".join(
+        c
+        for c in user.email.split("@")[0].lower()
+        if c.isalnum()
+    )[:24]
+
+    if not base:
+        base = "owner"
+
+    return (
+        f"{base}."
+        f"{secrets.token_hex(3)}"
+    )
+
+
+def _license_key(
+    prefix: str = "MEDX",
+) -> str:
+
+    return (
+        f"{prefix}-"
+        f"{secrets.token_hex(4).upper()}-"
+        f"{secrets.token_hex(4).upper()}-"
+        f"{secrets.token_hex(4).upper()}"
+    )
+
+
+def _application_number() -> str:
+
+    now = datetime.now(
+        timezone.utc
+    ).strftime("%Y%m%d")
+
+    return (
+        f"MED-{now}-"
+        f"{secrets.token_hex(4).upper()}"
+    )
+
+
+async def _get_payment(
+    db: AsyncSession,
+    user_id: UUID,
+):
+
+    payment = (
+        await db.execute(
+            select(PaymentTransaction)
+            .where(
+                PaymentTransaction.user_id
+                == user_id,
+
+                PaymentTransaction.status
+                == "verified",
+
+                PaymentTransaction.signature_verified.is_(
+                    True
+                ),
+            )
+            .order_by(
+                PaymentTransaction.created_at.desc()
+            )
+        )
+    ).scalars().first()
+
+    return payment
+
+
+async def _validate_submission(
+    db: AsyncSession,
+    user: User,
+):
+
+    if (
+        not user.email_verified
+        or not user.mobile_verified
+    ):
+        raise HTTPException(
+            400,
+            "Please verify your email and mobile number before submitting.",
+        )
+
+    if user.business_type not in {
+        "Pharmacy",
+        "Distributor",
+    }:
+        raise HTTPException(
+            400,
+            "Please select your business type first.",
+        )
+
+    payment = await _get_payment(
+        db,
+        user.id,
+    )
+
+    if not payment:
+        raise HTTPException(
+            402,
+            "A verified payment is required before final submission.",
+        )
+
+    if user.business_type == "Pharmacy":
+
+        business = (
+            await db.execute(
+                select(Pharmacy).where(
+                    Pharmacy.user_id
+                    == user.id
+                )
+            )
+        ).scalar_one_or_none()
+
+        if not business:
+            raise HTTPException(
+                400,
+                "Pharmacy details are incomplete.",
+            )
+
+        if not business.pharmacy_name:
+            raise HTTPException(
+                400,
+                "Pharmacy name is required.",
+            )
+
+    else:
+
+        business = (
+            await db.execute(
+                select(Distributor).where(
+                    Distributor.user_id
+                    == user.id
+                )
+            )
+        ).scalar_one_or_none()
+
+        if not business:
+            raise HTTPException(
+                400,
+                "Distributor details are incomplete.",
+            )
+
+        if not business.company_name:
+            raise HTTPException(
+                400,
+                "Company name is required.",
+            )
+
+    bank = (
+        await db.execute(
+            select(BankDetails).where(
+                BankDetails.user_id
+                == user.id
+            )
+        )
+    ).scalar_one_or_none()
+
+    if not bank:
+        raise HTTPException(
+            400,
+            "Bank details are required.",
+        )
+
+    locations = (
+        await db.execute(
+            select(BusinessLocation).where(
+                BusinessLocation.user_id
+                == user.id
+            )
+        )
+    ).scalars().all()
+
+    if not locations:
+        raise HTTPException(
+            400,
+            "At least one business location is required.",
+        )
+
+    docs = (
+        await db.execute(
+            select(Document).where(
+                Document.user_id
+                == user.id
+            )
+        )
+    ).scalars().all()
+
+    uploaded = {
+        d.document_type
+        for d in docs
+        if d.status == "uploaded"
+    }
+
+    missing = (
+        REQUIRED_DOCUMENT_TYPES
+        - uploaded
+    )
+
+    if missing:
+
+        raise HTTPException(
+            400,
+            "Required documents are missing: "
+            + ", ".join(
+                map(
+                    str,
+                    sorted(missing),
+                )
+            ),
+        )
+
+    return (
+        payment,
+        business,
+        bank,
+        locations,
+        docs,
+    )
+
+
+@router.post("/submit")
+async def submit_application(
+    user=Depends(current_user),
+    db: AsyncSession = Depends(get_db),
+):
+
+    (
+        payment,
+        business,
+        bank,
+        locations,
+        docs,
+    ) = await _validate_submission(
+        db,
+        user,
+    )
+
+    existing = (
+        await db.execute(
+            select(
+                OnboardingApplication
+            ).where(
+                OnboardingApplication.user_id
+                == user.id
+            )
+        )
+    ).scalar_one_or_none()
+
+    if (
+        existing
+        and existing.status == "pending"
+    ):
+        return _application_out(
+            existing,
+            user,
+        )
+
+    if (
+        existing
+        and existing.status == "approved"
+    ):
+        return _application_out(
+            existing,
+            user,
+        )
+
+    now = datetime.now(
+        timezone.utc
+    )
+
+    if not existing:
+
+        existing = OnboardingApplication(
+            user_id=user.id,
+
+            application_number=
+                _application_number(),
+
+            status="pending",
+
+            submitted_at=now,
+
+            erp_provision_status=
+                "not_started",
+        )
+
+        db.add(existing)
+
+    else:
+
+        existing.status = "pending"
+
+        existing.rejection_reason = None
+
+        existing.submitted_at = now
+
+        existing.reviewed_at = None
+
+        existing.reviewed_by = None
+
+        existing.erp_provision_error = None
+
+        existing.erp_provision_status = (
+            "not_started"
+        )
+
+    await audit(
+        db,
+        "ONBOARDING_APPLICATION_SUBMITTED",
+        user.id,
+        metadata={
+            "applicationNumber":
+                existing.application_number,
+
+            "paymentId":
+                str(payment.id),
+        },
+    )
+
+    await db.commit()
+
+    await db.refresh(
+        existing
+    )
+
+    return _application_out(
+        existing,
+        user,
+    )
+
+
+@router.get(
+    "/application-status"
+)
+async def application_status(
+    user=Depends(current_user),
+    db: AsyncSession = Depends(get_db),
+):
+
+    row = (
+        await db.execute(
+            select(
+                OnboardingApplication
+            ).where(
+                OnboardingApplication.user_id
+                == user.id
+            )
+        )
+    ).scalar_one_or_none()
+
+    if not row:
+
+        return {
+            "status": "not_submitted",
+            "applicationId": None,
+        }
+
+    result = _application_out(
+        row,
+        user,
+    )
+
+    # =====================================================
+    # APPROVED APPLICATION
+    # =====================================================
+
+    if (
+        row.status == "approved"
+        and row.temporary_password_enc
+    ):
+
+        try:
+
+            password = decrypt(
+                row.temporary_password_enc
+            )
+
+            if password:
+
+                result[
+                    "temporaryPassword"
+                ] = password
+
+            else:
+
+                result[
+                    "temporaryPassword"
+                ] = None
+
+        except Exception:
+
+            # IMPORTANT:
+            # Do not silently hide the problem.
+            logger.exception(
+                "Failed to decrypt temporary ERP password "
+                "for user_id=%s application_id=%s",
+                user.id,
+                row.id,
+            )
+
+            result[
+                "temporaryPassword"
+            ] = None
+
+            result[
+                "temporaryPasswordError"
+            ] = (
+                "Unable to decrypt temporary password. "
+                "Check that onboarding and admin "
+                "FIELD_ENCRYPTION_KEY values are identical."
+            )
+
+    else:
+
+        result[
+            "temporaryPassword"
+        ] = None
+
+    return result

@@ -1,0 +1,20 @@
+import express from 'express';
+import cors from 'cors';
+import helmet from 'helmet';
+import cookieParser from 'cookie-parser';
+import morgan from 'morgan';
+import { env } from './config/env.js';
+import { prisma } from './config/prisma.js';
+import authRoutes from './routes/auth.js';
+import onboardingRoutes from './routes/onboarding.js';
+import { notFound,errorHandler } from './middleware/error.js';
+
+const app=express();
+app.set('trust proxy',1);
+app.use(helmet({crossOriginResourcePolicy:{policy:'cross-origin'}}));
+app.use(cors({origin:env.frontendUrl,credentials:true}));
+app.use(cookieParser());app.use(express.json({limit:'2mb'}));app.use(express.urlencoded({extended:true}));app.use(morgan('dev'));
+app.get('/health',(req,res)=>res.json({ok:true,service:'medorax-api',time:new Date().toISOString()}));
+app.use('/api/auth',authRoutes);app.use('/api/onboarding',onboardingRoutes);app.use(notFound);app.use(errorHandler);
+const server=app.listen(env.port,()=>console.log(`MEDORAX API running on http://localhost:${env.port}`));
+const shutdown=async()=>{server.close();await prisma.$disconnect();process.exit(0)};process.on('SIGINT',shutdown);process.on('SIGTERM',shutdown);

@@ -1,0 +1,9 @@
+1. Copy .env.example to .env.
+2. Set DATABASE_URL to the SAME PostgreSQL database used by onboarding.
+3. Set FIELD_ENCRYPTION_KEY to the SAME Fernet key used by onboarding.
+4. Set ADMIN_BOOTSTRAP_EMAIL and ADMIN_BOOTSTRAP_PASSWORD.
+5. Set ADMIN_FRONTEND_ORIGINS to the real admin frontend domain.
+6. If ERP has an HTTP provisioning endpoint, set ERP_PROVISION_URL and ERP_PROVISION_TOKEN.
+7. Mount the onboarding document storage directory at /app/storage/documents if admin document downloads are required.
+8. Run: pip install -r requirements.txt
+9. Run: uvicorn app.main:app --host 0.0.0.0 --port 8010

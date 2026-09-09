@@ -1,0 +1,52 @@
+export const documentConfig = [
+  {
+    id: "gstCertificate",
+    title: "GST Certificate",
+    description: "Mandatory for tax compliance and invoicing.",
+    icon: "receipt",
+    status: "required",
+    documentType: 1, // Matches backend DocumentType enum
+    acceptedFormats: ".pdf,.jpg,.jpeg,.png",
+    maxSize: 10 * 1024 * 1024, // 10MB
+  },
+  {
+    id: "drugLicense",
+    title: "Drug License",
+    description: "Valid Form 20 or 21 is required.",
+    icon: "pill",
+    status: "required",
+    documentType: 2,
+    acceptedFormats: ".pdf,.jpg,.jpeg,.png",
+    maxSize: 10 * 1024 * 1024,
+  },
+  {
+    id: "panCard",
+    title: "PAN Card",
+    description: "Individual or Business PAN.",
+    icon: "card",
+    status: "required",
+    documentType: 3,
+    acceptedFormats: ".pdf,.jpg,.jpeg,.png",
+    maxSize: 10 * 1024 * 1024,
+  },
+  {
+    id: "aadhaarCard",
+    title: "Aadhaar Card",
+    description: "Personal identity verification.",
+    icon: "fingerprint",
+    status: "processing",
+    documentType: 4,
+    acceptedFormats: ".pdf,.jpg,.jpeg,.png",
+    maxSize: 10 * 1024 * 1024,
+  },
+  {
+    id: "businessRegistration",
+    title: "Business Registration",
+    description: "Shop Establishment Certificate.",
+    icon: "building",
+    status: "required",
+    documentType: 5,
+    acceptedFormats: ".pdf,.jpg,.jpeg,.png",
+    maxSize: 10 * 1024 * 1024,
+  },
+];

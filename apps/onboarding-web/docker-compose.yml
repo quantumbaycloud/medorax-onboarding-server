@@ -1,0 +1,12 @@
+services:
+  website:
+    container_name: medorax-website
+
+    build:
+      context: .
+      dockerfile: Dockerfile
+
+    ports:
+      - "127.0.0.1:5070:5070"
+
+    restart: unless-stopped
