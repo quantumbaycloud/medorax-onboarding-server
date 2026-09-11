@@ -18,7 +18,7 @@ async def create_one_time(db,user_id,purpose,ttl,metadata=None):
 
 async def send_verification(db,user):
     raw=await create_one_time(db,user.id,'email_verify',86400)
-    await send_email(user.email,'Verify your Medorax account',f'{settings.public_base_url}/verify-email?token={raw}\nThis link expires in 24 hours.')
+    await send_email(user.email,'Verify your Medorax account',f'{settings.public_base_url}/email-verification?token={raw}\nThis link expires in 24 hours.')
 
 async def send_reset(db,user):
     raw=await create_one_time(db,user.id,'password_reset',1800)

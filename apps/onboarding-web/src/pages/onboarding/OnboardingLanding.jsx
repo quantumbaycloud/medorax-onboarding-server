@@ -1,7 +1,6 @@
 // src/pages/OnboardingLanding.jsx
 import { useEffect, useRef } from "react";
 import { Helmet } from "react-helmet-async";
-import { Link } from "react-router-dom";
 
 import logo from "../../assets/logo.png"; // Adjust the path based on your project structure
 
@@ -159,15 +158,15 @@ void main() {
 
             {/* CTA Buttons */}
             <div className="flex gap-3 sm:gap-3.5 mb-5 flex-col sm:flex-row w-full sm:w-auto animate-rise-in animation-delay-250">
-              <Link
-                to="/register"
+              <a
+                href="/register"
                 className="text-[14px] sm:text-[14.5px] font-semibold px-6 sm:px-8 py-3 sm:py-3.5 rounded-xl border-none cursor-pointer inline-flex items-center justify-center gap-2 transition-all duration-200 ease-in-out bg-gradient-to-r from-blue-600 to-teal-500 text-white shadow-[0_10px_24px_-8px_rgba(37,99,235,0.5)] hover:-translate-y-0.5 hover:shadow-[0_14px_30px_-8px_rgba(37,99,235,0.6)] hover:brightness-104 w-full sm:w-auto"
               >
                 Create Account →
-              </Link>
-              <button className="text-[14px] sm:text-[14.5px] font-semibold px-6 sm:px-8 py-3 sm:py-3.5 rounded-xl border border-slate-200/10 bg-white/85 text-[#0f172a] shadow-[0_4px_14px_-6px_rgba(15,23,42,0.1)] hover:-translate-y-0.5 hover:bg-white hover:shadow-[0_8px_20px_-6px_rgba(15,23,42,0.14)] transition-all duration-200 ease-in-out w-full sm:w-auto">
+              </a>
+              <a href="/login" className="text-[14px] sm:text-[14.5px] font-semibold px-6 sm:px-8 py-3 sm:py-3.5 rounded-xl border border-slate-200/10 bg-white/85 text-[#0f172a] shadow-[0_4px_14px_-6px_rgba(15,23,42,0.1)] hover:-translate-y-0.5 hover:bg-white hover:shadow-[0_8px_20px_-6px_rgba(15,23,42,0.14)] transition-all duration-200 ease-in-out w-full sm:w-auto">
                 Login
-              </button>
+              </a>
             </div>
 
             {/* Features Grid */}

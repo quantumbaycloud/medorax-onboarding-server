@@ -18,46 +18,28 @@ async def send_email_with_attachment(
     attachment_name: str | None = None,
 ):
     if not settings.smtp_host:
-        if settings.environment != "production":
-            print(f"[DEV EMAIL] to={to} subject={subject}\n{text}")
+        if settings.environment != 'production':
+            print(f'[DEV EMAIL] to={to} subject={subject}\n{text}')
         return
 
     def _send():
         msg = EmailMessage()
-
-        msg["From"] = settings.smtp_from
-        msg["To"] = to
-        msg["Subject"] = subject
-
-        # Always send email content as plain text.
-        msg.set_content(
-            text,
-            subtype="plain",
-            charset="utf-8",
-        )
-
+        msg['From'] = settings.smtp_from
+        msg['To'] = to
+        msg['Subject'] = subject
+        msg.set_content(text)
         if attachment_bytes and attachment_name:
             msg.add_attachment(
                 attachment_bytes,
-                maintype="application",
-                subtype="pdf",
+                maintype='application',
+                subtype='pdf',
                 filename=Path(attachment_name).name,
             )
-
-        with smtplib.SMTP(
-            settings.smtp_host,
-            settings.smtp_port,
-            timeout=15,
-        ) as s:
+        with smtplib.SMTP(settings.smtp_host, settings.smtp_port, timeout=15) as s:
             if settings.smtp_starttls:
                 s.starttls()
-
             if settings.smtp_username:
-                s.login(
-                    settings.smtp_username,
-                    settings.smtp_password,
-                )
-
+                s.login(settings.smtp_username, settings.smtp_password)
             s.send_message(msg)
 
     await asyncio.to_thread(_send)

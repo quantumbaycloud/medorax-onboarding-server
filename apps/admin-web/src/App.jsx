@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 
-const API_BASE = (import.meta.env.VITE_ADMIN_API_URL || "https://admin-api.medorax.in").replace(/\/$/, "");
+const API_BASE = (import.meta.env.VITE_API_BASE_URL || "https://api.medorax.in").replace(/\/$/, "");
 
 async function api(path, options = {}) {
   const response = await fetch(`${API_BASE}${path}`, {

@@ -111,37 +111,6 @@ services:
       - medorax_onboarding
 
 
-  admin-api:
-    build:
-      context: ./services/admin-api
-      dockerfile: Dockerfile
-    restart: unless-stopped
-    env_file:
-      - /opt/medorax-onboarding-final/env/admin-api.env
-    depends_on:
-      postgres:
-        condition: service_healthy
-    ports:
-      - "127.0.0.1:8010:8001"
-    volumes:
-      - medorax_onboarding_documents:/app/storage/documents
-    networks:
-      - medorax_onboarding
-
-  admin-web:
-    build:
-      context: ./apps/admin-web
-      dockerfile: Dockerfile
-      args:
-        VITE_API_BASE_URL: https://api.medorax.in/
-    restart: unless-stopped
-    ports:
-      - "127.0.0.1:8090:80"
-    depends_on:
-      - admin-api
-    networks:
-      - medorax_onboarding
-
 volumes:
 
   medorax_onboarding_pgdata:
@@ -159,5 +128,3 @@ networks:
   medorax_onboarding:
     name: medorax-onboarding
     driver: bridge
-
-

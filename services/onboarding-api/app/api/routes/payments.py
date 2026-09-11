@@ -187,7 +187,7 @@ def _build_invoice_pdf(invoice: Invoice, user: User, payment: PaymentTransaction
     pdf.roundRect(0, height - 132, width, 132, 0, fill=1, stroke=0)
 
     # Logo. The logo is a local application asset, not a remote URL.
-    logo_path = __import__('pathlib').Path(__file__).resolve().parents[2] / 'assets' / 'medorax_logo.png'
+    logo_path = __import__('pathlib').Path(__file__).resolve().parents[2] / 'assets' / 'logo.png'
     if logo_path.exists():
         try:
             pdf.drawImage(ImageReader(str(logo_path)), margin, height - 105,

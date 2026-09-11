@@ -2,7 +2,6 @@ import { BrowserRouter as Router, Routes, Route, Navigate } from "react-router-d
 import { Toaster } from "react-hot-toast";
 
 import LoginPage from "./pages/login/LoginPage";
-import DashboardPage from "./pages/DashboardPage";
 
 import OnboardingLanding from "./pages/onboarding/OnboardingLanding";
 import RegistrationPage from "./pages/onboarding/RegistrationPage";
@@ -33,9 +32,6 @@ export default function App() {
         <Route path="/verify-email" element={<EmailVerificationPage />} />
         <Route path="/mobile-verification" element={<MobileVerificationPage />} />
         <Route path="/onboarding-complete" element={<OnboardingComplete />} />
-        <Route element={<ProtectedRoute />}>
-          <Route path="/dashboard" element={<DashboardPage />} />
-        </Route>
 
         <Route element={<ProtectedRoute />}>
           <Route path="/business-type" element={<BusinessTypePage />} />

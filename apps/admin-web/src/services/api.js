@@ -1,4 +1,4 @@
-const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || '/api'
+const API_BASE_URL = import.meta.env.VITE_ADMIN_API_URL || 'https://api.medorax.in/api'
 
 export async function apiRequest(path, options = {}) {
   const response = await fetch(`${API_BASE_URL}${path}`, {
