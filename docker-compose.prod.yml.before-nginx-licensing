@@ -77,8 +77,8 @@ services:
     volumes:
       - ./licensing-issuer/keys:/run/secrets/medorax-license:ro
 
-    ports:
-      - "127.0.0.1:8100:8100"
+    expose:
+      - "8100"
 
     depends_on:
       postgres:
