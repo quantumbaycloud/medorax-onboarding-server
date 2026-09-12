@@ -121,18 +121,13 @@ async def provision_erp(
             external_id,
         )
 
-        if external_id is None:
-            logger.error("ERP provisioning response did not contain an external id: %s", data)
-            return {
-                "status": "failed",
-                "externalId": None,
-                "error": "ERP provisioning succeeded but returned no external id",
-                "response": data,
-            }
-
         return {
             "status": "provisioned",
-            "externalId": str(external_id),
+            "externalId": (
+                str(external_id)
+                if external_id is not None
+                else None
+            ),
             "error": None,
             "response": data,
         }

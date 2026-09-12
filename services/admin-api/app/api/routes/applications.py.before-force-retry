@@ -1072,9 +1072,8 @@ async def retry_erp_provisioning(
             detail="Only approved applications can retry ERP provisioning",
         )
 
-    # Allow an explicit administrator retry even when the application
-    # was previously provisioned. This is required when the external
-    # ERP database was reset or the previous ERP installation was lost.
+    if row.erp_provision_status == "provisioned":
+        return await _row_detail(db, row)
 
     credential_result = await db.execute(
         select(ERPCredential).where(

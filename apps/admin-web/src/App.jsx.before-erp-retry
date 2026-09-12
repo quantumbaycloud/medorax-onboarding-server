@@ -79,26 +79,6 @@ function App() {
     try { setSelected(await api(`/api/admin/applications/${selected.application.id}/approve`, { method: "POST" })); await load(); }
     catch (e) { setError(e.message); }
   };
-
-  const retryErpProvisioning = async () => {
-    if (!selected) return;
-
-    if (!window.confirm("Retry ERP provisioning for this approved application?")) {
-      return;
-    }
-
-    try {
-      setError("");
-      const updated = await api(
-        `/api/admin/applications/${selected.application.id}/retry-erp-provisioning`,
-        { method: "POST" }
-      );
-      setSelected(updated);
-      await load();
-    } catch (e) {
-      setError(e.message);
-    }
-  };
   const reject = async () => {
     if (!selected) return;
     const reason = window.prompt("Enter rejection reason:");
@@ -140,19 +120,7 @@ function App() {
         <h3>Documents</h3>{selected.documents.map(x => <div key={x.id} style={{ ...item, display: "flex", justifyContent: "space-between" }}><span>{x.documentName} · {x.fileName}</span><a href={`${API_BASE}/api/admin/applications/${selected.application.id}/documents/${x.id}/download`} target="_blank" rel="noreferrer" style={{ color: "#2563eb" }}>Download</a></div>)}
         <h3>Payments</h3>{selected.payments.map(x => <div key={x.id} style={item}>{x.paymentId || "Payment"} · {money(x.amountPaise, x.currency)} · {x.status} · {x.signatureVerified ? "Verified" : "Not verified"}</div>)}
         {selected.application.status === "pending" && <div style={{ display: "flex", gap: 10, marginTop: 22 }}><button onClick={approve} style={{ ...button, background: "#15803d" }}>Approve & Generate ERP</button><button onClick={reject} style={{ ...button, background: "#b91c1c" }}>Reject</button></div>}
-        {selected.application.status === "approved" && <div style={{ marginTop: 20, padding: 15, background: "#f0fdf4", borderRadius: 12 }}>
-          <strong>ERP provisioning: {selected.application.erpProvisionStatus}</strong>
-          <div style={{ marginTop: 8 }}>ERP ID: {selected.application.erpExternalId || "Pending"}</div>
-
-          {selected.application.erpProvisionStatus !== "provisioned" && (
-            <button
-              onClick={retryErpProvisioning}
-              style={{ ...button, marginTop: 14, background: "#2563eb" }}
-            >
-              Retry ERP Provisioning
-            </button>
-          )}
-        </div>}
+        {selected.application.status === "approved" && <div style={{ marginTop: 20, padding: 15, background: "#f0fdf4", borderRadius: 12 }}><strong>ERP provisioning: {selected.application.erpProvisionStatus}</strong><div style={{ marginTop: 8 }}>ERP ID: {selected.application.erpExternalId || "Pending"}</div></div>}
         {selected.application.status === "rejected" && <div style={{ marginTop: 20, padding: 15, background: "#fef2f2", borderRadius: 12 }}><strong>Rejection:</strong> {selected.application.rejectionReason}</div>}
       </div></div>}
     </main>
