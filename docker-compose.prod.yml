@@ -63,6 +63,31 @@ services:
       - medorax_onboarding
 
 
+
+  licensing-issuer:
+    build:
+      context: ./licensing-issuer
+      dockerfile: Dockerfile
+
+    restart: unless-stopped
+
+    env_file:
+      - /opt/medorax-onboarding-final/app/medorax-final/licensing-issuer/.env
+
+    volumes:
+      - ./licensing-issuer/keys:/run/secrets/medorax-license:ro
+
+    expose:
+      - "8100"
+
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+    networks:
+      - medorax_onboarding
+
+
   onboarding-api:
     build:
       context: ./services/onboarding-api

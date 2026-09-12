@@ -107,6 +107,36 @@ class Settings(BaseSettings):
     erp_timeout_seconds: int = 20
 
     # -----------------------------------------------------
+    # Commercial MEDORAX ERP licensing
+    # -----------------------------------------------------
+
+    license_issuer_url: str = ""
+
+    license_issuer_token: str = ""
+
+    license_plan: str = "professional-annual"
+
+    license_max_devices: int = 1
+
+    license_modules: list[str] = [
+        "authentication",
+        "pharmacy",
+        "branches",
+        "staff",
+        "medicine",
+        "inventory",
+        "suppliers",
+        "purchases",
+        "customers",
+        "billing",
+        "prescriptions",
+        "reports",
+        "notifications",
+        "settings",
+        "audit",
+    ]
+
+    # -----------------------------------------------------
     # License
     # -----------------------------------------------------
 

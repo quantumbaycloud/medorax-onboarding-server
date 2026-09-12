@@ -74,6 +74,36 @@ services:
 
 
   # ============================================================
+  # COMMERCIAL MEDORAX LICENSE ISSUER
+  # ============================================================
+
+  licensing-issuer:
+    build:
+      context: ./licensing-issuer
+      dockerfile: Dockerfile
+
+    container_name: medorax-licensing-issuer
+    restart: unless-stopped
+
+    env_file:
+      - ./licensing-issuer/.env
+
+    volumes:
+      - ./licensing-issuer/keys:/run/secrets/medorax-license:ro
+      - medorax_licensing_data:/data
+
+    expose:
+      - "8100"
+
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+    networks:
+      - medorax
+
+
+  # ============================================================
   # ONBOARDING API
   # ============================================================
 

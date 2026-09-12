@@ -36,8 +36,7 @@ export default function DashboardPage() {
         if (!mounted) return;
 
         if (
-          result?.status !== "approved" ||
-          !result?.temporaryPassword
+          result?.status !== "approved"
         ) {
           if (result?.status === "pending") {
             navigate("/onboarding-complete", { replace: true });
@@ -262,9 +261,13 @@ export default function DashboardPage() {
 
             <CredentialBox
               label="Temporary Password"
-              value={data.temporaryPassword || "-"}
-              hidden={!showPassword}
+              value={data.temporaryPassword || "Password unavailable"}
+              hidden={
+                !showPassword &&
+                !!data.temporaryPassword
+              }
               onCopy={() =>
+                data.temporaryPassword &&
                 copyText(
                   data.temporaryPassword,
                   "ERP password"

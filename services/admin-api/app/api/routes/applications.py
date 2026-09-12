@@ -30,6 +30,7 @@ from app.models import (
 from app.schemas import RejectRequest
 from app.services.audit import audit
 from app.services.provisioning import provision_erp
+from app.services.licensing import issue_signed_license
 
 
 logger = logging.getLogger("medorax-admin")
@@ -704,16 +705,27 @@ async def approve_application(
     )
 
     # ---------------------------------------------------------
-    # Software License
+    # Commercial signed MEDORAX ERP License
+    #
+    # The license is issued by the dedicated licensing issuer.
+    # The issuer signs the canonical license payload using
+    # Ed25519. The ERP verifies it using its public key.
     # ---------------------------------------------------------
 
-    license_key = (
-        row.license_key
-        or (
-            f"MEDX-"
-            f"{secrets.token_hex(6).upper()}-"
-            f"{secrets.token_hex(6).upper()}"
-        )
+    signed_license = await issue_signed_license(
+        tenant_id=pharmacy_id,
+        plan=(
+            subscription.plan_code
+            if subscription
+            else settings.license_plan
+        ),
+        expires_at=expires,
+        max_devices=settings.license_max_devices,
+        modules=settings.license_modules,
+    )
+
+    license_key = str(
+        signed_license["license"]["license_id"]
     )
 
     # ---------------------------------------------------------
@@ -832,6 +844,22 @@ async def approve_application(
             "licenseKey": license_key,
 
             "licenseExpiresAt": expires,
+
+            "license": signed_license["license"],
+
+            "licenseSignature": signed_license["signature"],
+
+            "license": (
+                signed_license["license"]
+                if signed_license
+                else None
+            ),
+
+            "licenseSignature": (
+                signed_license["signature"]
+                if signed_license
+                else None
+            ),
 
             "erpUsername": username,
 
