@@ -707,16 +707,41 @@ async def approve_application(
     )
 
     # ---------------------------------------------------------
-    # ERP credentials FIRST
+    # Commercial signed MEDORAX ERP License
     #
-    # Credentials must exist before the commercial license is
-    # issued. The plaintext password is kept in memory only.
+    # The license is issued by the dedicated licensing issuer.
+    # The issuer signs the canonical license payload using
+    # Ed25519. The ERP verifies it using its public key.
+    # ---------------------------------------------------------
+
+    signed_license = await issue_signed_license(
+        tenant_id=pharmacy_id,
+        plan=(
+            subscription.plan_code
+            if subscription
+            else settings.license_plan
+        ),
+        expires_at=expires,
+        max_devices=settings.license_max_devices,
+        modules=settings.license_modules,
+    )
+
+    license_key = str(
+        signed_license["license"]["license_id"]
+    )
+
+    # ---------------------------------------------------------
+    # ERP username
     # ---------------------------------------------------------
 
     username = (
         row.erp_username
         or _make_username(user.email)
     )
+
+    # ---------------------------------------------------------
+    # Secure ERP credentials
+    # ---------------------------------------------------------
 
     credential_result = await db.execute(
         select(ERPCredential).where(
@@ -753,27 +778,22 @@ async def approve_application(
             erp_external_id=None,
         )
 
-        row.temporary_password_enc = (
-            encrypted_temporary_password
-        )
+        # Keep the encrypted credential synchronized on the
+        # application record so the onboarding API/dashboard
+        # can retrieve the temporary ERP password after approval.
+        # Never store the plaintext password here.
+        row.temporary_password_enc = encrypted_temporary_password
 
         db.add(credential)
 
     else:
         username = credential.erp_username
 
+        # Keep the application credential synchronized with the
+        # canonical encrypted ERP credential record.
         row.temporary_password_enc = (
             credential.temporary_password_enc
         )
-
-        if not credential.temporary_password_enc:
-            raise HTTPException(
-                status_code=500,
-                detail=(
-                    "ERP credential exists but encrypted "
-                    "temporary password is missing."
-                ),
-            )
 
         try:
             temporary_password = decrypt(
@@ -793,30 +813,6 @@ async def approve_application(
                     "temporary password. Check FIELD_ENCRYPTION_KEY."
                 ),
             )
-
-    # ---------------------------------------------------------
-    # Commercial signed MEDORAX ERP License SECOND
-    #
-    # Credentials now exist before the license is issued.
-    # The issuer signs the canonical license payload using
-    # Ed25519. The ERP verifies it using its public key.
-    # ---------------------------------------------------------
-
-    signed_license = await issue_signed_license(
-        tenant_id=pharmacy_id,
-        plan=(
-            subscription.plan_code
-            if subscription
-            else settings.license_plan
-        ),
-        expires_at=expires,
-        max_devices=settings.license_max_devices,
-        modules=settings.license_modules,
-    )
-
-    license_key = str(
-        signed_license["license"]["license_id"]
-    )
 
     # ---------------------------------------------------------
     # Update application

@@ -28,31 +28,16 @@ async def provision_erp(
     # -----------------------------------------------------
 
     if not settings.erp_provision_url:
-        error = (
-            "ERP provisioning failed: ERP_PROVISION_URL "
-            "is not configured."
+
+        logger.info(
+            "ERP provisioning URL is not configured. "
+            "Application will remain pending ERP provisioning."
         )
 
-        logger.error(error)
-
         return {
-            "status": "failed",
+            "status": "pending",
             "externalId": None,
-            "error": error,
-        }
-
-    if not settings.erp_provision_token:
-        error = (
-            "ERP provisioning failed: ERP_PROVISION_TOKEN "
-            "is not configured."
-        )
-
-        logger.error(error)
-
-        return {
-            "status": "failed",
-            "externalId": None,
-            "error": error,
+            "error": None,
         }
 
     headers = {
