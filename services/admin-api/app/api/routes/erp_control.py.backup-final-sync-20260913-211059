@@ -404,6 +404,7 @@ async def erp_catalog_sync(
         "status": "ok",
         "pharmacyId": pharmacy_id,
         "pharmacy_id": pharmacy_id,
+        "licenseKey": application.license_key,
         "licenseExpiresAt": application.license_expires_at,
         "options": options,
         "items": options,
