@@ -94,7 +94,7 @@ async def list_pharmacies(
             .order_by(Pharmacy.pharmacy_name.asc())
             .limit(1000)
         )
-    ).scalars().all()
+    ).all()
 
     return [
         {
