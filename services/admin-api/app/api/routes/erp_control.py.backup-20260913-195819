@@ -1,5 +1,3 @@
-from datetime import datetime, timezone
-from hmac import compare_digest
 from uuid import UUID, uuid4
 
 from fastapi import APIRouter, Depends, Header, HTTPException
@@ -88,9 +86,7 @@ async def list_pharmacies(
 ):
     rows = (
         await db.execute(
-            select(Pharmacy, OnboardingApplication.pharmacy_id)
-            .join(OnboardingApplication, OnboardingApplication.user_id == Pharmacy.user_id)
-            .where(OnboardingApplication.status == "approved")
+            select(Pharmacy)
             .order_by(Pharmacy.pharmacy_name.asc())
             .limit(1000)
         )
@@ -98,15 +94,13 @@ async def list_pharmacies(
 
     return [
         {
-            "id": str(pharmacy_id),
-            "pharmacyId": str(pharmacy_id),
+            "id": str(row.id),
             "name": row.pharmacy_name,
             "contactPerson": row.contact_person,
             "email": row.email,
             "gstNumber": row.gst_number,
         }
-        for row, pharmacy_id in rows
-        if pharmacy_id
+        for row in rows
     ]
 
 
@@ -287,11 +281,11 @@ async def erp_catalog_sync(
     db: AsyncSession = Depends(get_db),
 ):
     """
-    Machine-to-machine ERP synchronization.
+    Machine-to-machine endpoint used by the ERP.
 
-    The ERP authenticates using the provisioned license envelope.
-    Only an approved pharmacy with a valid, non-expired license can
-    retrieve its ERP configuration catalog.
+    The ERP sends its provisioned license key and signature.
+    We verify that they belong to this pharmacy before returning
+    the pharmacy-specific master-data catalog.
     """
 
     if not x_erp_license_key or not x_erp_license_signature:
@@ -300,40 +294,18 @@ async def erp_catalog_sync(
             detail="ERP license credentials required",
         )
 
-    application = await get_application_for_pharmacy(pharmacy_id, db)
+    application = await get_application_for_pharmacy(
+        pharmacy_id,
+        db,
+    )
 
-    if application.status != "approved":
-        raise HTTPException(
-            status_code=403,
-            detail="ERP synchronization requires an approved pharmacy",
-        )
-
-    if not application.license_key:
-        raise HTTPException(
-            status_code=409,
-            detail="ERP license key is not provisioned",
-        )
-
-    if application.license_expires_at:
-        expires = application.license_expires_at
-        if expires.tzinfo is None:
-            expires = expires.replace(tzinfo=timezone.utc)
-
-        if expires <= datetime.now(timezone.utc):
-            raise HTTPException(
-                status_code=403,
-                detail="MEDORAX ERP license has expired",
-            )
-
-    if not compare_digest(
-        str(application.license_key),
-        str(x_erp_license_key),
-    ):
+    if application.license_key != x_erp_license_key:
         raise HTTPException(
             status_code=401,
             detail="Invalid ERP license key",
         )
 
+    # licenseSignature is stored inside the approved ERP payload.
     stored_signature = None
 
     if application.erp_payload_json:
@@ -344,11 +316,10 @@ async def erp_catalog_sync(
                 import json
                 payload = json.loads(payload)
 
-            if isinstance(payload, dict):
-                stored_signature = (
-                    payload.get("licenseSignature")
-                    or payload.get("license_signature")
-                )
+            stored_signature = (
+                payload.get("licenseSignature")
+                or payload.get("license_signature")
+            )
         except Exception:
             stored_signature = None
 
@@ -358,10 +329,7 @@ async def erp_catalog_sync(
             detail="ERP license signature is not provisioned",
         )
 
-    if not compare_digest(
-        str(stored_signature),
-        str(x_erp_license_signature),
-    ):
+    if stored_signature != x_erp_license_signature:
         raise HTTPException(
             status_code=401,
             detail="Invalid ERP license signature",
@@ -382,31 +350,19 @@ async def erp_catalog_sync(
         )
     ).scalars().all()
 
-    options = [
-        {
-            "id": str(row.id),
-            "pharmacyId": row.pharmacy_id,
-            "pharmacy_id": row.pharmacy_id,
-            "optionType": row.option_type,
-            "option_type": row.option_type,
-            "code": row.code,
-            "name": row.name,
-            "isActive": row.is_active,
-            "is_active": row.is_active,
-            "sortOrder": row.sort_order,
-            "sort_order": row.sort_order,
-            "metadata": row.metadata_json,
-        }
-        for row in rows
-    ]
-
     return {
-        "status": "ok",
         "pharmacyId": pharmacy_id,
-        "pharmacy_id": pharmacy_id,
         "licenseKey": application.license_key,
-        "licenseExpiresAt": application.license_expires_at,
-        "options": options,
-        "items": options,
-        "count": len(options),
+        "options": [
+            {
+                "id": str(row.id),
+                "optionType": row.option_type,
+                "code": row.code,
+                "name": row.name,
+                "isActive": row.is_active,
+                "sortOrder": row.sort_order,
+                "metadata": row.metadata_json,
+            }
+            for row in rows
+        ],
     }
