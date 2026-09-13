@@ -167,28 +167,6 @@ services:
     networks:
       - medorax_onboarding
 
-
-  unified-docs:
-    build:
-      context: ./services/unified-docs
-      dockerfile: Dockerfile
-
-    restart: unless-stopped
-
-    env_file:
-      - /opt/medorax-onboarding-final/env/unified-docs.env
-
-    ports:
-      - "127.0.0.1:8095:8095"
-
-    depends_on:
-      - onboarding-api
-      - admin-api
-      - licensing-issuer
-
-    networks:
-      - medorax_onboarding
-
 volumes:
 
   medorax_onboarding_pgdata:

@@ -1,0 +1,204 @@
+[1mdiff --git a/services/admin-api/app/api/routes/applications.py b/services/admin-api/app/api/routes/applications.py[m
+[1mindex e5442a5..e45db4d 100644[m
+[1m--- a/services/admin-api/app/api/routes/applications.py[m
+[1m+++ b/services/admin-api/app/api/routes/applications.py[m
+[36m@@ -593,18 +593,20 @@[m [masync def approve_application([m
+ [m
+     if row.status == "approved":[m
+ [m
+[31m-        # If ERP is already provisioned, simply return.[m
+[32m+[m[32m        # Approval is a one-way business event.[m
+[32m+[m[32m        # Never issue a second license or regenerate credentials[m
+[32m+[m[32m        # through the approval endpoint.[m
+         if row.erp_provision_status == "provisioned":[m
+             return await _row_detail(db, row)[m
+ [m
+[31m-        # If ERP provisioning is pending/failed,[m
+[31m-        # allow retry instead of returning immediately.[m
+[31m-        if row.erp_provision_status not in ([m
+[31m-            "pending",[m
+[31m-            "failed",[m
+[31m-            None,[m
+[31m-        ):[m
+[31m-            return await _row_detail(db, row)[m
+[32m+[m[32m        raise HTTPException([m
+[32m+[m[32m            status_code=409,[m
+[32m+[m[32m            detail=([m
+[32m+[m[32m                "Application is already approved. "[m
+[32m+[m[32m                "Use Retry ERP Provisioning to retry the existing "[m
+[32m+[m[32m                "ERP credentials and signed license."[m
+[32m+[m[32m            ),[m
+[32m+[m[32m        )[m
+ [m
+     elif row.status != "pending":[m
+         raise HTTPException([m
+[36m@@ -857,24 +859,17 @@[m [masync def approve_application([m
+ [m
+             "licenseKey": license_key,[m
+ [m
+[31m-            "licenseExpiresAt": expires,[m
+[32m+[m[32m            # IMPORTANT:[m
+[32m+[m[32m            # The ERP validates this against the cryptographically[m
+[32m+[m[32m            # signed license. Use the exact signed timestamp.[m
+[32m+[m[32m            "licenseExpiresAt": int([m
+[32m+[m[32m                signed_license["license"]["expires_at"][m
+[32m+[m[32m            ),[m
+ [m
+             "license": signed_license["license"],[m
+ [m
+             "licenseSignature": signed_license["signature"],[m
+ [m
+[31m-            "license": ([m
+[31m-                signed_license["license"][m
+[31m-                if signed_license[m
+[31m-                else None[m
+[31m-            ),[m
+[31m-[m
+[31m-            "licenseSignature": ([m
+[31m-                signed_license["signature"][m
+[31m-                if signed_license[m
+[31m-                else None[m
+[31m-            ),[m
+[31m-[m
+             "erpUsername": username,[m
+ [m
+             "temporaryPassword": temporary_password,[m
+[36m@@ -1118,6 +1113,55 @@[m [masync def retry_erp_provisioning([m
+ [m
+     payload = dict(row.erp_payload_json)[m
+ [m
+[32m+[m[32m    # Retry must reuse the exact license originally issued during[m
+[32m+[m[32m    # administrator approval. It must never issue a new license.[m
+[32m+[m[32m    signed_license_payload = payload.get("license")[m
+[32m+[m
+[32m+[m[32m    if not isinstance(signed_license_payload, dict):[m
+[32m+[m[32m        raise HTTPException([m
+[32m+[m[32m            status_code=409,[m
+[32m+[m[32m            detail=([m
+[32m+[m[32m                "Existing ERP provisioning payload does not contain "[m
+[32m+[m[32m                "the signed MEDORAX license. Re-approval is required."[m
+[32m+[m[32m            ),[m
+[32m+[m[32m        )[m
+[32m+[m
+[32m+[m[32m    signed_expires_at = signed_license_payload.get("expires_at")[m
+[32m+[m
+[32m+[m[32m    if signed_expires_at is None:[m
+[32m+[m[32m        raise HTTPException([m
+[32m+[m[32m            status_code=409,[m
+[32m+[m[32m            detail=([m
+[32m+[m[32m                "Existing signed MEDORAX license does not contain "[m
+[32m+[m[32m                "an expiration timestamp."[m
+[32m+[m[32m            ),[m
+[32m+[m[32m        )[m
+[32m+[m
+[32m+[m[32m    try:[m
+[32m+[m[32m        signed_expires_at = int(signed_expires_at)[m
+[32m+[m[32m    except (TypeError, ValueError):[m
+[32m+[m[32m        raise HTTPException([m
+[32m+[m[32m            status_code=409,[m
+[32m+[m[32m            detail="Existing signed MEDORAX license expiration is invalid.",[m
+[32m+[m[32m        )[m
+[32m+[m
+[32m+[m[32m    # Force the provisioning payload to use the exact signed value.[m
+[32m+[m[32m    payload["licenseKey"] = str([m
+[32m+[m[32m        signed_license_payload.get("license_id")[m
+[32m+[m[32m        or row.license_key[m
+[32m+[m[32m        or ""[m
+[32m+[m[32m    )[m
+[32m+[m[32m    payload["licenseExpiresAt"] = signed_expires_at[m
+[32m+[m
+[32m+[m[32m    if not payload.get("licenseSignature"):[m
+[32m+[m[32m        raise HTTPException([m
+[32m+[m[32m            status_code=409,[m
+[32m+[m[32m            detail=([m
+[32m+[m[32m                "Existing ERP provisioning payload is missing "[m
+[32m+[m[32m                "the MEDORAX license signature."[m
+[32m+[m[32m            ),[m
+[32m+[m[32m        )[m
+[32m+[m
+     payload["erpUsername"] = credential.erp_username[m
+     payload["temporaryPassword"] = temporary_password[m
+ [m
+[1mdiff --git a/services/onboarding-api/app/api/routes/application.py b/services/onboarding-api/app/api/routes/application.py[m
+[1mindex 15a2309..c917ac8 100644[m
+[1m--- a/services/onboarding-api/app/api/routes/application.py[m
+[1m+++ b/services/onboarding-api/app/api/routes/application.py[m
+[36m@@ -61,19 +61,42 @@[m [mdef _application_out([m
+ [m
+         "pharmacyId": row.pharmacy_id,[m
+ [m
+[31m-        "licenseKey": row.license_key,[m
+[31m-[m
+[31m-        "licenseNumber": row.license_key,[m
+[31m-[m
+[31m-        "licenseExpiresAt": row.license_expires_at,[m
+[31m-[m
+[31m-        "erpUsername": row.erp_username,[m
+[31m-[m
+[31m-        "erpProvisionStatus": row.erp_provision_status,[m
+[31m-[m
+[31m-        "erpExternalId": row.erp_external_id,[m
+[31m-[m
+[31m-        "erpProvisionError": row.erp_provision_error,[m
+[32m+[m[32m        # ERP credentials and license details are only exposed after[m
+[32m+[m[32m        # administrator approval. Pending/rejected applications must[m
+[32m+[m[32m        # never expose provisioning credentials.[m
+[32m+[m[32m        "licenseKey": row.license_key if row.status == "approved" else None,[m
+[32m+[m
+[32m+[m[32m        "licenseNumber": row.license_key if row.status == "approved" else None,[m
+[32m+[m
+[32m+[m[32m        "licenseExpiresAt": ([m
+[32m+[m[32m            row.license_expires_at[m
+[32m+[m[32m            if row.status == "approved"[m
+[32m+[m[32m            else None[m
+[32m+[m[32m        ),[m
+[32m+[m
+[32m+[m[32m        "erpUsername": ([m
+[32m+[m[32m            row.erp_username[m
+[32m+[m[32m            if row.status == "approved"[m
+[32m+[m[32m            else None[m
+[32m+[m[32m        ),[m
+[32m+[m
+[32m+[m[32m        "erpProvisionStatus": ([m
+[32m+[m[32m            row.erp_provision_status[m
+[32m+[m[32m            if row.status == "approved"[m
+[32m+[m[32m            else "not_started"[m
+[32m+[m[32m        ),[m
+[32m+[m
+[32m+[m[32m        "erpExternalId": ([m
+[32m+[m[32m            row.erp_external_id[m
+[32m+[m[32m            if row.status == "approved"[m
+[32m+[m[32m            else None[m
+[32m+[m[32m        ),[m
+[32m+[m
+[32m+[m[32m        "erpProvisionError": ([m
+[32m+[m[32m            row.erp_provision_error[m
+[32m+[m[32m            if row.status == "approved"[m
+[32m+[m[32m            else None[m
+[32m+[m[32m        ),[m
+ [m
+         "fullName": user.full_name,[m
+ [m
+[36m@@ -412,11 +435,18 @@[m [masync def submit_application([m
+ [m
+         existing.reviewed_by = None[m
+ [m
+[32m+[m[32m        # A new submission is an unapproved application.[m
+[32m+[m[32m        # Never carry old ERP credentials/license/provisioning data[m
+[32m+[m[32m        # into the pending state.[m
+[32m+[m[32m        existing.pharmacy_id = None[m
+[32m+[m[32m        existing.license_key = None[m
+[32m+[m[32m        existing.license_expires_at = None[m
+[32m+[m[32m        existing.erp_username = None[m
+[32m+[m[32m        existing.temporary_password_enc = None[m
+[32m+[m[32m        existing.erp_external_id = None[m
+         existing.erp_provision_error = None[m
+[31m-[m
+[31m-        existing.erp_provision_status = ([m
+[31m-            "not_started"[m
+[31m-        )[m
+[32m+[m[32m        existing.erp_provision_status = "not_started"[m
+[32m+[m[32m        existing.erp_payload_json = None[m
+ [m
+     await audit([m
+         db,[m
