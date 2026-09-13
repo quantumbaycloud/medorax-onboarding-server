@@ -1,6 +1,6 @@
 import React from 'react';
 import { TrendingUp,AlertTriangle } from 'lucide-react';
-import { metricsData } from '../../pages/SupplierVerification/data';
+import { metricsData } from '../../pages/supplierVerification/data';
 
 const VerificationMetrics = () => {
   return (

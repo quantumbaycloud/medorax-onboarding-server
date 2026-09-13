@@ -7,7 +7,7 @@ import {
   Ban,
   UserCheck
 } from 'lucide-react';
-import { drawerData } from '../../pages/SupplierVerification/data';
+import { drawerData } from '../../pages/supplierVerification/data';
 
 const VerificationDrawer = () => {
   return (

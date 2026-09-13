@@ -1,6 +1,6 @@
 import React from 'react';
 import { Check, X, Eye, ChevronRight, RefreshCw, CheckCircle } from 'lucide-react';
-import { verificationData } from '../../pages/SupplierVerification/data';
+import { verificationData } from '../../pages/supplierVerification/data';
 
 const VerificationTable = ({ onRowSelect, selectedRow }) => {
   return (

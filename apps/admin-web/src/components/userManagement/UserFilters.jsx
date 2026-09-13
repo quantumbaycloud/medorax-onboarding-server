@@ -1,6 +1,6 @@
 import React from 'react';
 import { Search, Download, ChevronDown } from 'lucide-react';
-import { roles, statuses, branches } from '../../pages/UserManagement/data';
+import { roles, statuses, branches } from '../../pages/userManagement/data';
 
 const UserFilters = () => {
   return (

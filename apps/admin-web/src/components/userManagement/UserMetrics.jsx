@@ -1,6 +1,6 @@
 import React from 'react';
 import { TrendingUp } from 'lucide-react';
-import { metricsData } from '../../pages/UserManagement/data';
+import { metricsData } from '../../pages/userManagement/data';
 
 const UserMetrics = () => {
   return (

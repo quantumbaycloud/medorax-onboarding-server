@@ -1,6 +1,6 @@
 import React from 'react';
 import { Edit, Key, Ban, CheckCircle } from 'lucide-react';
-import { usersData } from '../../pages/UserManagement/data';
+import { usersData } from '../../pages/userManagement/data';
 
 const UserTable = () => {
   return (
