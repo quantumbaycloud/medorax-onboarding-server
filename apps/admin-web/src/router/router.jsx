@@ -12,6 +12,7 @@ import SystemSettings from '../components/systemSettings';
 import NotificationsAlerts from '../components/notificationsAlerts';
 import DataManagement from '../components/dataManagement';
 import SecuritySettings from '../components/securitySettings';
+import ERPConfiguration from '../pages/ERPConfiguration';
 export const router = createBrowserRouter([
   {
     path: "/",
@@ -24,6 +25,7 @@ export const router = createBrowserRouter([
       { path: 'supplier-verification', element: <SupplierVerification /> },
       { path: 'onboarding-approvals', element: <OnboardingApprovals /> },
 
+      { path: 'erp-configuration', element: <ERPConfiguration /> },
       { path: 'system-settings', element: <SystemSettings /> },
       { path: 'audit-logs', element: <AuditLogs /> },
       { path: 'notifications-alerts', element: <NotificationsAlerts /> },

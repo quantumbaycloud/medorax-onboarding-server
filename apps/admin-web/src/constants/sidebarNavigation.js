@@ -42,6 +42,12 @@ export const sidebarNavigation = [
     path: '/supplier-verification'
   },
   {
+    key: 'erp-configuration',
+    label: 'ERP Configuration',
+    icon: Database,
+    path: '/erp-configuration'
+  },
+  {
     key: 'system-settings',
     label: 'System Settings',
     icon: Settings,

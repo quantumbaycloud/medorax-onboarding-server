@@ -248,3 +248,67 @@ class AdminAuditLog(Base):
     application_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), nullable=True, index=True)
     metadata_json: Mapped[dict | None] = mapped_column(JSON)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc), index=True)
+
+# ---------------------------------------------------------
+# ERP pharmacy-specific master data
+# ---------------------------------------------------------
+
+class ERPConfigOption(Base):
+    __tablename__ = "erp_config_options"
+
+    id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        primary_key=True,
+        default=uuid.uuid4,
+    )
+
+    pharmacy_id: Mapped[str] = mapped_column(
+        String(60),
+        index=True,
+        nullable=False,
+    )
+
+    option_type: Mapped[str] = mapped_column(
+        String(60),
+        index=True,
+        nullable=False,
+    )
+
+    code: Mapped[str] = mapped_column(
+        String(80),
+        nullable=False,
+    )
+
+    name: Mapped[str] = mapped_column(
+        String(160),
+        nullable=False,
+    )
+
+    is_active: Mapped[bool] = mapped_column(
+        Boolean,
+        default=True,
+        nullable=False,
+        index=True,
+    )
+
+    sort_order: Mapped[int] = mapped_column(
+        Integer,
+        default=0,
+        nullable=False,
+    )
+
+    metadata_json: Mapped[dict | None] = mapped_column(
+        JSON,
+        nullable=True,
+    )
+
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        default=lambda: datetime.now(timezone.utc),
+    )
+
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        default=lambda: datetime.now(timezone.utc),
+        onupdate=lambda: datetime.now(timezone.utc),
+    )

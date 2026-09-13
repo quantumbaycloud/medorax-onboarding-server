@@ -1,0 +1,195 @@
+import logging
+
+import httpx
+
+from app.core.config import settings
+
+
+logger = logging.getLogger(
+    "medorax-admin.provisioning"
+)
+
+
+async def provision_erp(
+    payload: dict,
+):
+    """
+    Provision an approved applicant in the ERP.
+
+    If ERP_PROVISION_URL is empty, the application
+    remains approved and provisioning is marked pending.
+
+    This allows onboarding/admin to work before the
+    actual ERP provisioning endpoint is connected.
+    """
+
+    # -----------------------------------------------------
+    # ERP provisioning is not configured
+    # -----------------------------------------------------
+
+    if not settings.erp_provision_url:
+        error = (
+            "ERP provisioning failed: ERP_PROVISION_URL "
+            "is not configured."
+        )
+
+        logger.error(error)
+
+        return {
+            "status": "failed",
+            "externalId": None,
+            "error": error,
+        }
+
+    if not settings.erp_provision_token:
+        error = (
+            "ERP provisioning failed: ERP_PROVISION_TOKEN "
+            "is not configured."
+        )
+
+        logger.error(error)
+
+        return {
+            "status": "failed",
+            "externalId": None,
+            "error": error,
+        }
+
+    headers = {
+        "Content-Type": "application/json",
+        "Accept": "application/json",
+    }
+
+    if settings.erp_provision_token:
+
+        headers["Authorization"] = (
+            f"Bearer {settings.erp_provision_token}"
+        )
+
+    # -----------------------------------------------------
+    # Call ERP
+    # -----------------------------------------------------
+
+    try:
+
+        async with httpx.AsyncClient(
+            timeout=settings.erp_timeout_seconds
+        ) as client:
+
+            response = await client.post(
+                settings.erp_provision_url,
+                json=payload,
+                headers=headers,
+            )
+
+        # -------------------------------------------------
+        # ERP rejected request
+        # -------------------------------------------------
+
+        if response.status_code >= 400:
+
+            error_text = response.text[:1000]
+
+            logger.error(
+                "ERP provisioning failed. "
+                "status=%s response=%s",
+                response.status_code,
+                error_text,
+            )
+
+            return {
+                "status": "failed",
+                "externalId": None,
+                "error": (
+                    f"ERP returned HTTP "
+                    f"{response.status_code}: "
+                    f"{error_text}"
+                ),
+            }
+
+        # -------------------------------------------------
+        # Parse ERP response
+        # -------------------------------------------------
+
+        data = {}
+
+        if response.content:
+
+            try:
+                data = response.json()
+
+            except ValueError:
+
+                data = {
+                    "rawResponse": response.text[:1000]
+                }
+
+        external_id = (
+            data.get("externalId")
+            or data.get("id")
+            or data.get("userId")
+        )
+
+        logger.info(
+            "ERP provisioning successful. "
+            "external_id=%s",
+            external_id,
+        )
+
+        if external_id is None:
+            logger.error("ERP provisioning response did not contain an external id: %s", data)
+            return {
+                "status": "failed",
+                "externalId": None,
+                "error": "ERP provisioning succeeded but returned no external id",
+                "response": data,
+            }
+
+        return {
+            "status": "provisioned",
+            "externalId": str(external_id),
+            "error": None,
+            "response": data,
+        }
+
+    except httpx.TimeoutException as exc:
+
+        logger.exception(
+            "ERP provisioning timeout"
+        )
+
+        return {
+            "status": "failed",
+            "externalId": None,
+            "error": (
+                f"ERP provisioning timeout: "
+                f"{str(exc)[:1000]}"
+            ),
+        }
+
+    except httpx.RequestError as exc:
+
+        logger.exception(
+            "ERP provisioning request failed"
+        )
+
+        return {
+            "status": "failed",
+            "externalId": None,
+            "error": (
+                f"ERP request failed: "
+                f"{str(exc)[:1000]}"
+            ),
+        }
+
+    except Exception as exc:
+
+        logger.exception(
+            "Unexpected ERP provisioning error"
+        )
+
+        return {
+            "status": "failed",
+            "externalId": None,
+            "error": str(exc)[:1000],
+        }
