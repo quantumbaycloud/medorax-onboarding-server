@@ -1,0 +1,210 @@
+services:
+
+  postgres:
+    image: postgres:17-alpine
+    restart: unless-stopped
+
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB}
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+
+    volumes:
+      - medorax_onboarding_pgdata:/var/lib/postgresql/data
+
+    healthcheck:
+      test:
+        [
+          "CMD-SHELL",
+          "pg_isready -U ${POSTGRES_USER} -d ${POSTGRES_DB}"
+        ]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 20s
+
+    networks:
+      - medorax_onboarding
+
+
+  redis:
+    image: redis:8-alpine
+    restart: unless-stopped
+
+    command:
+      [
+        "redis-server",
+        "--requirepass",
+        "${REDIS_PASSWORD}",
+        "--appendonly",
+        "yes",
+        "--appendfsync",
+        "everysec"
+      ]
+
+    volumes:
+      - medorax_onboarding_redisdata:/data
+
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "redis-cli",
+          "-a",
+          "${REDIS_PASSWORD}",
+          "ping"
+        ]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 10s
+
+    networks:
+      - medorax_onboarding
+
+
+
+  licensing-issuer:
+    build:
+      context: ./licensing-issuer
+      dockerfile: Dockerfile
+
+    restart: unless-stopped
+
+    env_file:
+      - /opt/medorax-onboarding-final/app/medorax-final/licensing-issuer/.env
+
+    volumes:
+      - ./licensing-issuer/keys:/run/secrets/medorax-license:ro
+
+    ports:
+      - "127.0.0.1:8100:8100"
+
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+    networks:
+      - medorax_onboarding
+
+
+  onboarding-api:
+    build:
+      context: ./services/onboarding-api
+      dockerfile: Dockerfile
+
+    restart: unless-stopped
+
+    env_file:
+      - /opt/medorax-onboarding-final/env/onboarding-api.env
+
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+      redis:
+        condition: service_healthy
+
+    ports:
+      - "127.0.0.1:8000:8000"
+
+    volumes:
+      - medorax_onboarding_documents:/app/storage/documents
+
+    networks:
+      - medorax_onboarding
+
+
+  onboarding-web:
+    build:
+      context: ./apps/onboarding-web
+      dockerfile: Dockerfile
+
+      args:
+        VITE_API_URL: https://api.medorax.in
+        VITE_GOOGLE_MAPS_API_KEY: ${VITE_GOOGLE_MAPS_API_KEY}
+
+    restart: unless-stopped
+
+    ports:
+      - "127.0.0.1:8080:80"
+
+    depends_on:
+      - onboarding-api
+
+    networks:
+      - medorax_onboarding
+
+
+  admin-api:
+    build:
+      context: ./services/admin-api
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    env_file:
+      - /opt/medorax-onboarding-final/env/admin-api.env
+    depends_on:
+      postgres:
+        condition: service_healthy
+    ports:
+      - "127.0.0.1:8010:8001"
+    volumes:
+      - medorax_onboarding_documents:/app/storage/documents
+    networks:
+      - medorax_onboarding
+
+  admin-web:
+    build:
+      context: ./apps/admin-web
+      dockerfile: Dockerfile
+      args:
+        VITE_API_BASE_URL: https://api.medorax.in/
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:8090:80"
+    depends_on:
+      - admin-api
+    networks:
+      - medorax_onboarding
+
+
+  unified-docs:
+    build:
+      context: ./services/unified-docs
+      dockerfile: Dockerfile
+
+    restart: unless-stopped
+
+    env_file:
+      - /opt/medorax-onboarding-final/env/unified-docs.env
+
+    ports:
+      - "127.0.0.1:8095:8095"
+
+    depends_on:
+      - onboarding-api
+      - admin-api
+      - licensing-issuer
+
+    networks:
+      - medorax_onboarding
+
+volumes:
+
+  medorax_onboarding_pgdata:
+    name: medorax_onboarding_pgdata
+
+  medorax_onboarding_redisdata:
+    name: medorax_onboarding_redisdata
+
+  medorax_onboarding_documents:
+    name: medorax_onboarding_documents
+
+
+networks:
+
+  medorax_onboarding:
+    name: medorax-onboarding
+    driver: bridge
+
+
