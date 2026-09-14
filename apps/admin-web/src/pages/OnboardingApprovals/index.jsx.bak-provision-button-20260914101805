@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { CheckCircle, XCircle, Eye, RefreshCw, ShieldCheck } from 'lucide-react';
-import { getOnboardingApplications, getOnboardingApplication, approveOnboardingApplication, rejectOnboardingApplication, retryErpProvisioning } from '../../services/onboardingApprovalApi';
+import { getOnboardingApplications, getOnboardingApplication, approveOnboardingApplication, rejectOnboardingApplication } from '../../services/onboardingApprovalApi';
 
 const money = n => n == null ? '—' : `₹${(Number(n)/100).toLocaleString('en-IN')}`;
 
@@ -24,30 +24,6 @@ export default function OnboardingApprovals(){
     >
       <Eye size={17}/> Review
     </button>
-
-    {x.status === 'approved' && x.erpProvisionStatus !== 'provisioned' && (
-      <button
-        onClick={async()=>{
-          if(!confirm('Retry ERP provisioning for this approved application?')) return;
-          setBusy(true);
-          setError('');
-          try {
-            const r = await retryErpProvisioning(x.id);
-            setSelected(r);
-            await load();
-          } catch(e) {
-            setError(e.message || 'ERP provisioning failed');
-          } finally {
-            setBusy(false);
-          }
-        }}
-        disabled={busy}
-        className="inline-flex items-center gap-1 px-3 py-2 rounded-lg bg-amber-50 text-amber-700 border border-amber-200 font-semibold disabled:opacity-50"
-        title="Provision ERP"
-      >
-        <ShieldCheck size={17}/> Provision ERP
-      </button>
-    )}
 
     {x.status === 'pending' && (
       <button
@@ -82,64 +58,7 @@ export default function OnboardingApprovals(){
       <section className="mt-5"><h3 className="font-bold mb-2">Documents</h3><div className="space-y-2">{(selected.documents||[]).map(d=><div key={d.id} className="p-3 rounded-xl border flex justify-between"><span>{d.fileName}</span><span className="text-xs text-slate-500">{d.status}</span></div>)}</div></section>
       {selected.payment&&<div className="mt-5 p-4 rounded-xl bg-emerald-50 border border-emerald-100"><div className="font-semibold">Verified Payment</div><div className="text-sm mt-1">{money(selected.payment.amountPaise)} · {selected.payment.paymentId}</div></div>}
       {selected.status==='pending'&&<><textarea value={note} onChange={e=>setNote(e.target.value)} rows="3" placeholder="Optional approval note" className="w-full mt-5 border rounded-xl p-3"/><div className="grid grid-cols-2 gap-3 mt-4"><button disabled={busy} onClick={approve} className="py-3 rounded-xl bg-[#006d40] text-white font-bold flex justify-center gap-2"><CheckCircle size={18}/> Approve & Generate Credentials</button><button disabled={busy} onClick={reject} className="py-3 rounded-xl bg-red-50 text-red-700 font-bold flex justify-center gap-2"><XCircle size={18}/> Reject</button></div></>}
-      {selected.status==='approved'&&selected.erpUsername&&<div className={`mt-5 p-5 rounded-2xl border ${
-        selected.erpProvisionStatus==='provisioned'
-          ? 'bg-emerald-50 border-emerald-200'
-          : 'bg-amber-50 border-amber-200'
-      }`}>
-        <div className={`flex gap-2 items-center font-bold ${
-          selected.erpProvisionStatus==='provisioned'
-            ? 'text-emerald-800'
-            : 'text-amber-800'
-        }`}>
-          <ShieldCheck size={19}/>
-          {selected.erpProvisionStatus==='provisioned'
-            ? 'ERP Provisioned'
-            : 'ERP Provisioning Required'}
-        </div>
-
-        <div className="mt-3 text-sm">
-          Username: <b>{selected.erpUsername}</b>
-        </div>
-
-        <div className="text-sm mt-1">
-          ERP Provision Status: <b>{selected.erpProvisionStatus || 'pending'}</b>
-        </div>
-
-        {selected.erpProvisionError&&
-          <div className="mt-3 text-sm text-red-700 bg-red-50 border border-red-200 rounded-lg p-3">
-            <b>Last provisioning error:</b> {selected.erpProvisionError}
-          </div>
-        }
-
-        {selected.erpProvisionStatus!=='provisioned'&&
-          <button
-            disabled={busy}
-            onClick={async()=>{
-              if(!confirm('Retry ERP provisioning for this approved application?')) return;
-              setBusy(true);
-              setError('');
-              try {
-                const r = await retryErpProvisioning(selected.id);
-                setSelected(r);
-                await load();
-              } catch(e) {
-                setError(e.message || 'ERP provisioning failed');
-              } finally {
-                setBusy(false);
-              }
-            }}
-            className="mt-4 inline-flex items-center gap-2 px-4 py-2 rounded-lg bg-[#006d40] text-white font-semibold disabled:opacity-50"
-          >
-            <ShieldCheck size={17}/>
-            Provision ERP Now
-          </button>
-        }
-
-        <div className="text-sm mt-3">
-          Temporary password is delivered to the customer and is not displayed again here.
-        </div>
-      </div>}
+      {selected.status==='approved'&&selected.erpUsername&&<div className="mt-5 p-5 rounded-2xl bg-emerald-50 border border-emerald-200"><div className="flex gap-2 items-center font-bold text-emerald-800"><ShieldCheck size={19}/> Credentials generated</div><div className="mt-3 text-sm">Username: <b>{selected.erpUsername}</b></div><div className="text-sm">Temporary password is delivered to the customer and is not displayed again here.</div></div>}
     </div></div>}
   </div>
 }
