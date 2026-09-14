@@ -1117,10 +1117,8 @@ async def retry_erp_provisioning(
 
     payload = dict(row.erp_payload_json)
 
-    # Retry normally reuses the existing signed license. However, if the
-    # configured device limit has been increased, upgrade the existing
-    # license through the central licensing issuer so the new signed
-    # payload carries the configured max_devices value.
+    # Retry must reuse the exact license originally issued during
+    # administrator approval. It must never issue a new license.
     signed_license_payload = payload.get("license")
 
     if not isinstance(signed_license_payload, dict):
@@ -1151,71 +1149,7 @@ async def retry_erp_provisioning(
             detail="Existing signed MEDORAX license expiration is invalid.",
         )
 
-    # Upgrade an existing license when the configured device limit is higher.
-    # The license is re-signed by the central licensing issuer; the ERP never
-    # bypasses or modifies the signed max_devices value locally.
-    existing_max_devices = signed_license_payload.get("max_devices", 1)
-
-    try:
-        existing_max_devices = int(existing_max_devices)
-    except (TypeError, ValueError):
-        existing_max_devices = 1
-
-    if existing_max_devices < settings.license_max_devices:
-        try:
-            upgraded_license = await issue_signed_license(
-                tenant_id=str(row.pharmacy_id),
-                plan=str(
-                    signed_license_payload.get("plan")
-                    or settings.license_plan
-                ),
-                expires_at=datetime.fromtimestamp(
-                    signed_expires_at,
-                    timezone.utc,
-                ),
-                max_devices=settings.license_max_devices,
-                modules=signed_license_payload.get(
-                    "modules",
-                    settings.license_modules,
-                ),
-            )
-        except Exception:
-            logger.exception(
-                "Failed to upgrade MEDORAX license device limit. "
-                "application_id=%s",
-                application_id,
-            )
-            raise HTTPException(
-                status_code=500,
-                detail="Unable to upgrade the MEDORAX license device limit",
-            )
-
-        signed_license_payload = upgraded_license["license"]
-        payload["license"] = signed_license_payload
-        payload["licenseSignature"] = upgraded_license["signature"]
-
-        row.license_key = str(
-            signed_license_payload["license_id"]
-        )
-        row.license_expires_at = datetime.fromtimestamp(
-            int(signed_license_payload["expires_at"]),
-            timezone.utc,
-        )
-
-        logger.info(
-            "Device-limit upgrade: application_id=%s old_max_devices=%s "
-            "new_max_devices=%s license_id=%s",
-            application_id,
-            existing_max_devices,
-            settings.license_max_devices,
-            signed_license_payload["license_id"],
-        )
-
-        # The newly issued license may retain the same expiry, but its
-        # signed payload must be persisted before provisioning.
-        row.erp_payload_json = payload
-
-    # Force the provisioning payload to use the signed value.
+    # Force the provisioning payload to use the exact signed value.
     payload["licenseKey"] = str(
         signed_license_payload.get("license_id")
         or row.license_key

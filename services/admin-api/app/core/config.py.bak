@@ -116,7 +116,7 @@ class Settings(BaseSettings):
 
     license_plan: str = "professional-annual"
 
-    license_max_devices: int = 5
+    license_max_devices: int = 1
 
     license_modules: list[str] = [
         "authentication",
