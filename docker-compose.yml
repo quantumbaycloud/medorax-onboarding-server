@@ -125,6 +125,9 @@ services:
       redis:
         condition: service_healthy
 
+    ports:
+      - "127.0.0.1:8000:8000"
+
     expose:
       - "8000"
 
@@ -150,6 +153,9 @@ services:
 
     container_name: medorax-onboarding-web
     restart: unless-stopped
+
+    ports:
+      - "127.0.0.1:8080:80"
 
     expose:
       - "80"
@@ -189,22 +195,25 @@ services:
 
 # ==============================================================
 # VOLUMES
-# ==============================================================
 
 volumes:
 
   medorax_pgdata:
-    name: medorax_pgdata
+    name: medorax_onboarding_pgdata
 
   medorax_redisdata:
-    name: medorax_redisdata
+    name: medorax_onboarding_redisdata
 
   medorax_documents:
-    name: medorax_documents
+    name: medorax_onboarding_documents
+
+  medorax_licensing_data:
+    name: medorax_licensing_data
 
 
-# ==============================================================
 # NETWORK
+
+
 # ==============================================================
 
 networks:

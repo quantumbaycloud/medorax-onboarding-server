@@ -222,7 +222,7 @@ class LicenseRequest(BaseModel):
     expires_at: int
 
     max_devices: int = Field(
-        default=5,
+        default=1,
         ge=1,
         le=100,
     )

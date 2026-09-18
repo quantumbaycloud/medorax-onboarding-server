@@ -152,6 +152,7 @@ services:
       - medorax_onboarding_documents:/app/storage/documents
     networks:
       - medorax_onboarding
+      - erp_internal
 
   admin-web:
     build:
@@ -206,5 +207,10 @@ networks:
   medorax_onboarding:
     name: medorax-onboarding
     driver: bridge
+
+  erp_internal:
+    external: true
+    name: medorax-erp-production_internal
+
 
 
